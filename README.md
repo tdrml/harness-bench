@@ -16,7 +16,9 @@ So I tried to measure the same layers under controlled conditions: same model, s
 
 The interesting conclusion is the tension between those two facts: **harness ROI is a function of horizon, not a constant.** Below some task-length/autonomy threshold, frontier models don't need the scaffolding. Production fleets operate far above that threshold, where the same scaffolding blocks failures continuously. Benchmarks that grade harnesses on short tasks are measuring the flat part of the curve.
 
-Two harness failure modes surfaced along the way that I haven't seen documented (§ Findings 2–3), including the adversarial reviewer discovering a real, unplanted prototype-chain bug in the target codebase.
+**Pilot 3 found the onset.** At hour-scale, cross-cutting feature builds (a new worker mode wired through five layers; a 17-file refactor; a webhook flow), the top-tier model still didn't need the harness — but the small model did, decisively: **haiku went 1/3 bare and 3/3 with the full harness**, matching sonnet's outcomes at roughly a third of the cost (n=1 per cell; § Pilot 3). The harness acted as a model-tier equalizer exactly where horizon got long.
+
+Three harness failure modes surfaced along the way that I haven't seen documented (§ Findings 2–3, 7), including the adversarial reviewer discovering a real, unplanted prototype-chain bug in the target codebase — and a grading meta-result: **half of the failures my own instrument recorded were the instrument's fault** (§ Finding 6).
 
 ---
 
@@ -85,6 +87,27 @@ Raw per-run records (JSONL journals including per-invocation costs and raw revie
 
 ---
 
+## Pilot 3 — hour-scale tasks, and the onset of separation
+
+Three cross-cutting feature builds against the same pinned repo, each spanning multiple packages: **L1** add a complete new worker mode end-to-end (prompt module → worker class → entrypoint routing → work-item schema → CDK task definition), **L2** refactor the queue behind a pluggable backend interface and migrate every caller, **L3** extend the webhook handler for `pull_request: review_requested` with a task lookup and enqueue. Per-package held-out acceptance suites, red-on-pristine by construction. Grid: {sonnet, haiku} × {A0, FULL}, n=1 per cell. Runs took 5–17 minutes and $0.39–$4.70 each; these tasks legitimately extend tests, so test edits were recorded rather than failed.
+
+**True results, after autopsy-verified corrections (see Finding 6):**
+
+| | A0 | FULL |
+|---|---|---|
+| **sonnet** | 3/3 | 3/3 |
+| **haiku** | **1/3** | **3/3** |
+
+**5. Separation exists, and it is model-tier × horizon.** Sonnet needed no harness even here. Bare haiku failed two of three — and the failure modes are the production-relevant ones: on L2 it built a *correct* abstraction (held-out suite green) but left 5 repo tests broken mid-migration and declared done — breadth-of-completion failure; on L3 it shipped a 200 where the spec said 202, with its own added tests asserting its own misreading — spec-fidelity failure, invisible to self-validation. With the FULL harness, haiku went 3/3, matching sonnet's outcomes at ~⅓ the cost. Attribution caveats are real at n=1: in L2:haiku:FULL the done-gate never fired and the reviewer verdict didn't parse, so discipline-by-contract vs. variance can't be distinguished from one run.
+
+**6. Grading agents is harder than running them.** Four failures were recorded; **two were my instrument's bugs**, found only by manually autopsying every failure: (a) my L3 holdout set env vars in `beforeEach`, but agents that idiomatically initialize config-dependent services at module scope crash the import before any hook runs; (b) re-scoring from saved diffs silently used stale build output for cross-package imports, because `git diff` cannot carry gitignored `dist/`. Both corrections are append-only events in the journal next to the original records. If a five-task pilot by the person who wrote both the tasks and the grader has a 50% false-failure rate among recorded failures, leaderboard-scale results graded by weaker pipelines deserve deep suspicion — this is the false-*negative* twin of UTBoost's ~20% false-positive finding.
+
+**7. The detection–transport gap.** In L3:haiku:FULL, the adversarial reviewer *caught real spec deviations* and returned `REQUEST_CHANGES` — formatted as markdown prose instead of the required JSON. The runner's parser dropped it, no revision ran, and the pipeline proceeded exactly as if the review had approved. Detection succeeded; the verdict transport failed. This is Finding 2's sharper sibling, and it indicts my own runner: the primary agent's output got a schema-salvage retry, the reviewer's verdict did not. **Every inter-agent handoff needs the same contract enforcement as the final output — a harness is only as strong as its least-enforced edge.** (This exact pattern — schema-force *everything*, with salvage retries — is what my production platform converged on after equivalent incidents.)
+
+*Pilot 3 incident note:* the first L1:sonnet:FULL attempt exhausted the 16 GB host VM (12-worker vitest pool × CDK synth under a concurrent headless agent; no OOM-kill, full thrash). Reruns were memory-capped (worker pools + cgroup MemoryMax). The benchmark's own infrastructure OOM'ing the host is, fittingly, an operational-reality datum.
+
+---
+
 ## Where harness value actually lives (the production contrast)
 
 The platform I operate in production runs coding agents for up to four hours per task in isolated containers, across a fleet that has authored 1,000+ merged PRs (~98% merge rate) across ~13 repositories. Its telemetry over a recent window shows **28.8% of dev-class runs (106/368) hitting at least one deterministic guardrail block** — dirty-tree stops, force-push prevention, done-without-PR gates — each one a divergence prose rules had failed to prevent. The same platform needed schema-forced outputs after prose JSON kept breaking, payload offload after context silently dropped, and a render-before-merge gate after reviewer agents approved visually wrong UIs.
@@ -93,7 +116,7 @@ Same model family. Same harness patterns. Opposite ROI.
 
 The variable that changed is **horizon**: minutes vs hours, one objective vs a task DAG, fresh checkout vs accumulated state, one agent vs a fleet with coordination surface. The pilots bound the harness-value curve from below; production telemetry bounds it from above. The interesting research question — and the one pilot 3 aims at — is where the knee is.
 
-**Pilot 3 (pre-registered next step):** hour-scale, cross-cutting feature builds on the same target repo (new worker mode end-to-end, pluggable queue backend, webhook event expansion) under the same arms, hunting the onset of separation.
+**Pilot 3 (results above)** found that onset: at hour-scale cross-cutting work, the harness flipped the small model from 1/3 to 3/3 while the frontier model still didn't need it. The remaining open question is where *sonnet's* knee is — plausibly at the multi-hour, multi-task, fleet-coordination scale the production platform operates at, which single-cell benchmarks may never reach economically.
 
 ## Threats to validity
 
@@ -112,6 +135,7 @@ cd .pristine-telos && git checkout c62bcf64 && pnpm install --frozen-lockfile &&
 mkdir .claude-bench-config && cp ~/.claude/.credentials.json .claude-bench-config/  # isolated auth
 node runner/run-pilot.mjs    # pilot 1 (15 runs, ~$4)
 node runner/run-pilot2.mjs   # pilot 2 (40 runs, ~$12)
+node runner/run-pilot3.mjs   # pilot 3 (12 hour-scale runs, ~$24)
 ```
 
 Runners are sequential, resumable (JSONL journal is the source of truth), and kill-switched on summed API-equivalent cost.
