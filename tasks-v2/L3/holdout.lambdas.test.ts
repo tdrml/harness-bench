@@ -24,6 +24,11 @@ const REQUIRED_ENV: Record<string, string> = {
 };
 const WEBHOOK_SECRET = 'test-webhook-secret';
 
+// Env must be live BEFORE the handler import: implementations may idiomatically
+// initialize config-dependent services at module scope (the handler already
+// creates module-level AWS clients), and getConfig() Zod-validates the env.
+process.env = { ...process.env, ...REQUIRED_ENV };
+
 const mockSsmSend = vi.fn();
 const mockSqsSend = vi.fn();
 const mockDdbSend = vi.fn();

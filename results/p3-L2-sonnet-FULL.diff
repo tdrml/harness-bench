@@ -1,0 +1,1094 @@
+diff --git a/packages/core/__tests__/queue.test.ts b/packages/core/__tests__/queue.test.ts
+index 6000cca..50d7d9c 100644
+--- a/packages/core/__tests__/queue.test.ts
++++ b/packages/core/__tests__/queue.test.ts
+@@ -1,6 +1,12 @@
+ import { describe, expect, it, vi, beforeEach } from 'vitest';
+-import { WorkItemSchema, enqueueWorkItems } from '../src/queue/index.js';
++import {
++  WorkItemSchema,
++  enqueueWorkItems,
++  SqsQueueBackend,
++  InMemoryQueueBackend,
++} from '../src/queue/index.js';
+ import type { WorkItem } from '../src/queue/index.js';
++import { RetryableError } from '../src/errors/index.js';
+ import type { SQSClient } from '@aws-sdk/client-sqs';
+ 
+ // ---------------------------------------------------------------------------
+@@ -207,13 +213,13 @@ describe('enqueueWorkItems', () => {
+   it('sends a single batch for ≤10 items', async () => {
+     const client = makeSqsClient();
+     const items: WorkItem[] = Array.from({ length: 5 }, () => makeItem('RECONCILE'));
+-    await enqueueWorkItems(items, client);
++    await enqueueWorkItems(items, new SqsQueueBackend(client));
+     expect(client.send).toHaveBeenCalledTimes(1);
+   });
+ 
+   it('sends the correct QueueUrl', async () => {
+     const client = makeSqsClient();
+-    await enqueueWorkItems([makeItem('RECONCILE')], client);
++    await enqueueWorkItems([makeItem('RECONCILE')], new SqsQueueBackend(client));
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.QueueUrl).toBe(QUEUE_URL);
+   });
+@@ -221,7 +227,7 @@ describe('enqueueWorkItems', () => {
+   it('uses repoFullName as MessageGroupId', async () => {
+     const client = makeSqsClient();
+     const item = makeItem('RECONCILE', { repoFullName: 'org/repo' });
+-    await enqueueWorkItems([item], client);
++    await enqueueWorkItems([item], new SqsQueueBackend(client));
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.Entries[0].MessageGroupId).toBe('org/repo');
+   });
+@@ -229,7 +235,7 @@ describe('enqueueWorkItems', () => {
+   it('serialises item as MessageBody JSON', async () => {
+     const client = makeSqsClient();
+     const item = makeItem('RECONCILE');
+-    await enqueueWorkItems([item], client);
++    await enqueueWorkItems([item], new SqsQueueBackend(client));
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(JSON.parse(cmd.input.Entries[0].MessageBody as string)).toEqual(item);
+   });
+@@ -237,14 +243,14 @@ describe('enqueueWorkItems', () => {
+   it('batches >10 items into multiple SendMessageBatchCommand calls', async () => {
+     const client = makeSqsClient();
+     const items: WorkItem[] = Array.from({ length: 25 }, () => makeItem('RECONCILE'));
+-    await enqueueWorkItems(items, client);
++    await enqueueWorkItems(items, new SqsQueueBackend(client));
+     expect(client.send).toHaveBeenCalledTimes(3); // 10 + 10 + 5
+   });
+ 
+   it('each batch has at most 10 entries', async () => {
+     const client = makeSqsClient();
+     const items: WorkItem[] = Array.from({ length: 23 }, () => makeItem('RECONCILE'));
+-    await enqueueWorkItems(items, client);
++    await enqueueWorkItems(items, new SqsQueueBackend(client));
+     const calls = (client.send as ReturnType<typeof vi.fn>).mock.calls;
+     expect(calls[0][0].input.Entries).toHaveLength(10);
+     expect(calls[1][0].input.Entries).toHaveLength(10);
+@@ -253,15 +259,89 @@ describe('enqueueWorkItems', () => {
+ 
+   it('sends nothing for empty items array', async () => {
+     const client = makeSqsClient();
+-    await enqueueWorkItems([], client);
++    await enqueueWorkItems([], new SqsQueueBackend(client));
+     expect(client.send).not.toHaveBeenCalled();
+   });
+ 
+   it('throws if SQS_QUEUE_URL is not set', async () => {
+     delete process.env['SQS_QUEUE_URL'];
+     const client = makeSqsClient();
+-    await expect(enqueueWorkItems([makeItem('RECONCILE')], client)).rejects.toThrow(
+-      'SQS_QUEUE_URL',
+-    );
++    await expect(
++      enqueueWorkItems([makeItem('RECONCILE')], new SqsQueueBackend(client)),
++    ).rejects.toThrow('SQS_QUEUE_URL');
++  });
++});
++
++// ---------------------------------------------------------------------------
++// InMemoryQueueBackend
++// ---------------------------------------------------------------------------
++
++describe('InMemoryQueueBackend', () => {
++  it('accumulates sent entries', async () => {
++    const backend = new InMemoryQueueBackend();
++    const result = await backend.sendBatch([
++      { id: '0', body: 'body-0', groupId: 'acme/app' },
++      { id: '1', body: 'body-1', groupId: 'acme/app' },
++    ]);
++    expect(result.failedIds).toEqual([]);
++    expect(backend.sent).toEqual([
++      { id: '0', body: 'body-0', groupId: 'acme/app' },
++      { id: '1', body: 'body-1', groupId: 'acme/app' },
++    ]);
++  });
++
++  it('accumulates entries across multiple sendBatch calls', async () => {
++    const backend = new InMemoryQueueBackend();
++    await backend.sendBatch([{ id: '0', body: 'a', groupId: 'g1' }]);
++    await backend.sendBatch([{ id: '0', body: 'b', groupId: 'g2' }]);
++    expect(backend.sent).toHaveLength(2);
++  });
++
++  it('never fails', async () => {
++    const backend = new InMemoryQueueBackend();
++    const result = await backend.sendBatch([{ id: '0', body: 'a', groupId: 'g1' }]);
++    expect(result.failedIds).toEqual([]);
++  });
++
++  it('works end-to-end with enqueueWorkItems', async () => {
++    const backend = new InMemoryQueueBackend();
++    const items: WorkItem[] = Array.from({ length: 15 }, () => makeItem('RECONCILE'));
++    await enqueueWorkItems(items, backend);
++    expect(backend.sent).toHaveLength(15);
++    expect(backend.sent.every((entry) => entry.groupId === 'acme/app')).toBe(true);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// enqueueWorkItems — failedIds path
++// ---------------------------------------------------------------------------
++
++describe('enqueueWorkItems — failedIds', () => {
++  it('throws a RetryableError naming the failed ids', async () => {
++    const backend = {
++      sendBatch: vi.fn().mockResolvedValue({ failedIds: ['1', '2'] }),
++    };
++    await expect(
++      enqueueWorkItems([makeItem('RECONCILE'), makeItem('RECONCILE')], backend),
++    ).rejects.toThrow(RetryableError);
++    await expect(
++      enqueueWorkItems([makeItem('RECONCILE'), makeItem('RECONCILE')], backend),
++    ).rejects.toThrow(/1.*2/);
++  });
++
++  it('does not throw when failedIds is empty', async () => {
++    const backend = {
++      sendBatch: vi.fn().mockResolvedValue({ failedIds: [] }),
++    };
++    await expect(enqueueWorkItems([makeItem('RECONCILE')], backend)).resolves.toBeUndefined();
++  });
++
++  it('stops enqueueing further batches once a batch reports failedIds', async () => {
++    const backend = {
++      sendBatch: vi.fn().mockResolvedValue({ failedIds: ['0'] }),
++    };
++    const items: WorkItem[] = Array.from({ length: 15 }, () => makeItem('RECONCILE'));
++    await expect(enqueueWorkItems(items, backend)).rejects.toThrow(RetryableError);
++    expect(backend.sendBatch).toHaveBeenCalledTimes(1);
+   });
+ });
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index 443bb4d..0b12bf1 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -1,4 +1,5 @@
+-import { SendMessageBatchCommand, type SQSClient } from '@aws-sdk/client-sqs';
++import { type SQSClient, SendMessageBatchCommand } from '@aws-sdk/client-sqs';
++import { RetryableError } from '../errors/index.js';
+ import type { WorkItem } from './work-items.js';
+ 
+ export { WorkItemSchema, type WorkItem, type WorkItemBase } from './work-items.js';
+@@ -19,24 +20,64 @@ export type {
+   QuickTaskWorkItem,
+ } from './work-items.js';
+ 
+-const BATCH_SIZE = 10;
++export interface QueueEntry {
++  id: string;
++  body: string;
++  groupId: string;
++}
+ 
+-export async function enqueueWorkItems(items: WorkItem[], sqsClient: SQSClient): Promise<void> {
+-  const queueUrl = process.env['SQS_QUEUE_URL'];
+-  if (!queueUrl) {
+-    throw new Error('SQS_QUEUE_URL environment variable is not set');
+-  }
++export interface QueueBackend {
++  sendBatch(entries: QueueEntry[]): Promise<{ failedIds: string[] }>;
++}
++
++export class SqsQueueBackend implements QueueBackend {
++  constructor(private readonly sqsClient: SQSClient) {}
++
++  async sendBatch(entries: QueueEntry[]): Promise<{ failedIds: string[] }> {
++    const queueUrl = process.env['SQS_QUEUE_URL'];
++    if (!queueUrl) {
++      throw new Error('SQS_QUEUE_URL environment variable is not set');
++    }
+ 
+-  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+-    const batch = items.slice(i, i + BATCH_SIZE);
+     const command = new SendMessageBatchCommand({
+       QueueUrl: queueUrl,
+-      Entries: batch.map((item, index) => ({
+-        Id: String(index),
+-        MessageBody: JSON.stringify(item),
+-        MessageGroupId: item.repoFullName,
++      Entries: entries.map((entry) => ({
++        Id: entry.id,
++        MessageBody: entry.body,
++        MessageGroupId: entry.groupId,
+       })),
+     });
+-    await sqsClient.send(command);
++    const result = await this.sqsClient.send(command);
++    const failedIds = (result.Failed ?? [])
++      .map((failure) => failure.Id)
++      .filter((id): id is string => id !== undefined);
++    return { failedIds };
++  }
++}
++
++export class InMemoryQueueBackend implements QueueBackend {
++  readonly sent: QueueEntry[] = [];
++
++  async sendBatch(entries: QueueEntry[]): Promise<{ failedIds: string[] }> {
++    this.sent.push(...entries);
++    return { failedIds: [] };
++  }
++}
++
++const BATCH_SIZE = 10;
++
++export async function enqueueWorkItems(items: WorkItem[], backend: QueueBackend): Promise<void> {
++  for (let i = 0; i < items.length; i += BATCH_SIZE) {
++    const batch = items.slice(i, i + BATCH_SIZE);
++    const entries: QueueEntry[] = batch.map((item, index) => ({
++      id: String(index),
++      body: JSON.stringify(item),
++      groupId: item.repoFullName,
++    }));
++
++    const { failedIds } = await backend.sendBatch(entries);
++    if (failedIds.length > 0) {
++      throw new RetryableError(`Failed to enqueue work items: ${failedIds.join(', ')}`);
++    }
+   }
+ }
+diff --git a/packages/lambdas/src/handlers/bootstrap-project.ts b/packages/lambdas/src/handlers/bootstrap-project.ts
+index 322d42b..00ccc32 100644
+--- a/packages/lambdas/src/handlers/bootstrap-project.ts
++++ b/packages/lambdas/src/handlers/bootstrap-project.ts
+@@ -1,17 +1,19 @@
+-import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
++import { SSMClient } from '@aws-sdk/client-ssm';
+ import {
+-  createDynamoDBClient,
+-  ProjectsService,
+   GitHubConnector,
+-  enqueueWorkItems,
+   PermanentError,
++  ProjectsService,
++  SqsQueueBackend,
++  createDynamoDBClient,
++  enqueueWorkItems,
+ } from '@telos/core';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const projectsService = new ProjectsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+@@ -28,20 +30,16 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const issueNumber =
+-    typeof input['issueNumber'] === 'number' ? input['issueNumber'] : undefined;
++  const issueNumber = typeof input['issueNumber'] === 'number' ? input['issueNumber'] : undefined;
+   const issueBody = typeof input['issueBody'] === 'string' ? input['issueBody'] : '';
+   const sourceRepoOwner =
+     typeof input['sourceRepoOwner'] === 'string' ? input['sourceRepoOwner'] : undefined;
+   const sourceRepoName =
+     typeof input['sourceRepoName'] === 'string' ? input['sourceRepoName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+ 
+   if (!projectId || !repoFullName || issueNumber === undefined) {
+-    throw new PermanentError(
+-      'Missing required fields: projectId, repoFullName, issueNumber',
+-    );
++    throw new PermanentError('Missing required fields: projectId, repoFullName, issueNumber');
+   }
+ 
+   const parts = repoFullName.split('/');
+@@ -86,10 +84,8 @@ export const handler = wrapHandler(async (input, logger) => {
+   );
+ 
+   // Enqueue the follow-on work item
+-  const followOn = [
+-    { type: 'BOOTSTRAP_REPO' as const, projectId, repoFullName, correlationId },
+-  ];
+-  await enqueueWorkItems(followOn, sqsClient);
++  const followOn = [{ type: 'BOOTSTRAP_REPO' as const, projectId, repoFullName, correlationId }];
++  await enqueueWorkItems(followOn, queueBackend);
+ 
+   return { status: 'SUCCESS', output: { followOn } };
+ });
+diff --git a/packages/lambdas/src/handlers/bootstrap-repo.ts b/packages/lambdas/src/handlers/bootstrap-repo.ts
+index fefabc7..f46019f 100644
+--- a/packages/lambdas/src/handlers/bootstrap-repo.ts
++++ b/packages/lambdas/src/handlers/bootstrap-repo.ts
+@@ -1,17 +1,19 @@
+-import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
++import { SSMClient } from '@aws-sdk/client-ssm';
+ import {
+-  createDynamoDBClient,
+-  ProjectsService,
+   GitHubConnector,
+-  enqueueWorkItems,
+   PermanentError,
++  ProjectsService,
++  SqsQueueBackend,
++  createDynamoDBClient,
++  enqueueWorkItems,
+ } from '@telos/core';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const projectsService = new ProjectsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+@@ -20,8 +22,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+ 
+   if (!projectId || !repoFullName) {
+     throw new PermanentError('Missing required fields: projectId, repoFullName');
+@@ -70,7 +71,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const followOn = [
+     { type: 'GENERATE_ARCHITECTURE' as const, projectId, repoFullName, correlationId },
+   ];
+-  await enqueueWorkItems(followOn, sqsClient);
++  await enqueueWorkItems(followOn, queueBackend);
+ 
+   return { status: 'SUCCESS', output: { followOn } };
+ });
+diff --git a/packages/lambdas/src/handlers/create-issues.ts b/packages/lambdas/src/handlers/create-issues.ts
+index 277a43f..35589b5 100644
+--- a/packages/lambdas/src/handlers/create-issues.ts
++++ b/packages/lambdas/src/handlers/create-issues.ts
+@@ -1,17 +1,19 @@
+-import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
++import { SSMClient } from '@aws-sdk/client-ssm';
+ import {
+-  createDynamoDBClient,
+-  TaskGraphsService,
+   GitHubConnector,
+-  enqueueWorkItems,
+   PermanentError,
++  SqsQueueBackend,
++  TaskGraphsService,
++  createDynamoDBClient,
++  enqueueWorkItems,
+ } from '@telos/core';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const taskGraphsService = new TaskGraphsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+@@ -57,8 +59,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+ 
+   if (!projectId || !repoFullName) {
+     throw new PermanentError('Missing required fields: projectId, repoFullName');
+@@ -80,7 +81,10 @@ export const handler = wrapHandler(async (input, logger) => {
+   for (const task of sorted) {
+     // Idempotency: skip tasks that already have an issue
+     if (task.issueNumber !== undefined) {
+-      logger.info('Task already has issue — skipping', { taskId: task.taskId, issueNumber: task.issueNumber });
++      logger.info('Task already has issue — skipping', {
++        taskId: task.taskId,
++        issueNumber: task.issueNumber,
++      });
+       continue;
+     }
+ 
+@@ -118,7 +122,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }));
+ 
+   if (followOn.length > 0) {
+-    await enqueueWorkItems(followOn, sqsClient);
++    await enqueueWorkItems(followOn, queueBackend);
+   }
+ 
+   logger.info('create-issues complete', {
+diff --git a/packages/lambdas/src/handlers/enrich-issue.ts b/packages/lambdas/src/handlers/enrich-issue.ts
+index 41038b2..aea93b8 100644
+--- a/packages/lambdas/src/handlers/enrich-issue.ts
++++ b/packages/lambdas/src/handlers/enrich-issue.ts
+@@ -1,21 +1,20 @@
+-import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
+-import { GitHubConnector, PermanentError, enqueueWorkItems } from '@telos/core';
++import { SSMClient } from '@aws-sdk/client-ssm';
++import { GitHubConnector, PermanentError, SqsQueueBackend, enqueueWorkItems } from '@telos/core';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ 
+ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+-  const issueNumber =
+-    typeof input['issueNumber'] === 'number' ? input['issueNumber'] : undefined;
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const issueNumber = typeof input['issueNumber'] === 'number' ? input['issueNumber'] : undefined;
+ 
+   if (!projectId || !repoFullName || issueNumber === undefined) {
+     throw new PermanentError('Missing required fields: projectId, repoFullName, issueNumber');
+@@ -56,7 +55,7 @@ export const handler = wrapHandler(async (input, logger) => {
+     },
+   ];
+ 
+-  await enqueueWorkItems(followOn, sqsClient);
++  await enqueueWorkItems(followOn, queueBackend);
+ 
+   logger.info('enrich-issue complete', { projectId, issueNumber });
+   return { status: 'SUCCESS', output: { followOn } };
+diff --git a/packages/lambdas/src/handlers/generate-architecture.ts b/packages/lambdas/src/handlers/generate-architecture.ts
+index 52002d2..bc13c0a 100644
+--- a/packages/lambdas/src/handlers/generate-architecture.ts
++++ b/packages/lambdas/src/handlers/generate-architecture.ts
+@@ -1,15 +1,17 @@
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
++  PermanentError,
+   ProjectsService,
++  SqsQueueBackend,
++  createDynamoDBClient,
+   enqueueWorkItems,
+-  PermanentError,
+ } from '@telos/core';
++import { pollEcsTask, startEcsTask } from '../shared/ecs-task-runner.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+-import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const projectsService = new ProjectsService(dynamoClient);
+ 
+@@ -18,8 +20,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+ 
+   if (!projectId || !repoFullName) {
+     throw new PermanentError('Missing required fields: projectId, repoFullName');
+@@ -72,10 +73,8 @@ export const handler = wrapHandler(async (input, logger) => {
+   // COMPLETED — HLD output stored in task-outputs by ECS shuttle
+   logger.info('Architecture generated successfully', { projectId, runId });
+ 
+-  const followOn = [
+-    { type: 'PLAN_TASKS' as const, projectId, repoFullName, correlationId },
+-  ];
+-  await enqueueWorkItems(followOn, sqsClient);
++  const followOn = [{ type: 'PLAN_TASKS' as const, projectId, repoFullName, correlationId }];
++  await enqueueWorkItems(followOn, queueBackend);
+ 
+   return { status: 'SUCCESS', output: { followOn } };
+ });
+diff --git a/packages/lambdas/src/handlers/merge-pr.ts b/packages/lambdas/src/handlers/merge-pr.ts
+index dc0b480..4102bbc 100644
+--- a/packages/lambdas/src/handlers/merge-pr.ts
++++ b/packages/lambdas/src/handlers/merge-pr.ts
+@@ -1,18 +1,20 @@
+-import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
++import { SSMClient } from '@aws-sdk/client-ssm';
+ import {
+-  createDynamoDBClient,
+-  TaskGraphsService,
+   GitHubConnector,
++  PermanentError,
++  SqsQueueBackend,
++  TaskGraphsService,
++  createDynamoDBClient,
+   enqueueWorkItems,
+   evaluateMergePolicy,
+-  PermanentError,
+ } from '@telos/core';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const taskGraphsService = new TaskGraphsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+@@ -21,11 +23,9 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+   const taskId = typeof input['taskId'] === 'string' ? input['taskId'] : undefined;
+-  const prNumber =
+-    typeof input['prNumber'] === 'number' ? input['prNumber'] : undefined;
++  const prNumber = typeof input['prNumber'] === 'number' ? input['prNumber'] : undefined;
+ 
+   if (!projectId || !repoFullName || !taskId || prNumber === undefined) {
+     throw new PermanentError('Missing required fields: projectId, repoFullName, taskId, prNumber');
+@@ -78,7 +78,7 @@ export const handler = wrapHandler(async (input, logger) => {
+           prNumber,
+         },
+       ];
+-      await enqueueWorkItems(followOn, sqsClient);
++      await enqueueWorkItems(followOn, queueBackend);
+       return { status: 'SUCCESS', output: { followOn } };
+     }
+ 
+@@ -123,7 +123,7 @@ export const handler = wrapHandler(async (input, logger) => {
+       correlationId,
+       taskId: t.taskId,
+     }));
+-    await enqueueWorkItems(followOn, sqsClient);
++    await enqueueWorkItems(followOn, queueBackend);
+     logger.info('Ready tasks enqueued', { projectId, count: readyTasks.length });
+     return { status: 'SUCCESS', output: { followOn } };
+   }
+@@ -142,7 +142,7 @@ export const handler = wrapHandler(async (input, logger) => {
+         status: 'COMPLETED',
+       },
+     ];
+-    await enqueueWorkItems(followOn, sqsClient);
++    await enqueueWorkItems(followOn, queueBackend);
+     logger.info('All tasks completed — enqueuing UPDATE_STATUS', { projectId });
+     return { status: 'SUCCESS', output: { followOn } };
+   }
+diff --git a/packages/lambdas/src/handlers/plan-tasks.ts b/packages/lambdas/src/handlers/plan-tasks.ts
+index 2a0091c..9eb3cfd 100644
+--- a/packages/lambdas/src/handlers/plan-tasks.ts
++++ b/packages/lambdas/src/handlers/plan-tasks.ts
+@@ -1,22 +1,24 @@
+-import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
++import { SSMClient } from '@aws-sdk/client-ssm';
+ import {
+-  createDynamoDBClient,
++  GitHubConnector,
++  PermanentError,
+   ProjectsService,
+-  TaskGraphsService,
+   RunsService,
++  SqsQueueBackend,
++  type Task,
++  TaskGraphsService,
+   TaskOutputsService,
+-  GitHubConnector,
++  createDynamoDBClient,
+   enqueueWorkItems,
+-  PermanentError,
+-  type Task,
+ } from '@telos/core';
++import { pollEcsTask, startEcsTask } from '../shared/ecs-task-runner.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+-import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const projectsService = new ProjectsService(dynamoClient);
+ const taskGraphsService = new TaskGraphsService(dynamoClient);
+@@ -36,9 +38,7 @@ function validateDag(tasks: Task[]): void {
+   for (const task of tasks) {
+     for (const dep of task.dependsOn) {
+       if (!taskIds.has(dep)) {
+-        throw new PermanentError(
+-          `Task ${task.taskId} depends on unknown task ${dep}`,
+-        );
++        throw new PermanentError(`Task ${task.taskId} depends on unknown task ${dep}`);
+       }
+     }
+   }
+@@ -81,8 +81,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+ 
+   if (!projectId || !repoFullName) {
+     throw new PermanentError('Missing required fields: projectId, repoFullName');
+@@ -112,9 +111,7 @@ export const handler = wrapHandler(async (input, logger) => {
+       const output = await taskOutputsService.readOutput(latestArchitectRun.runId);
+       if (output?.['hld']) {
+         hldContent =
+-          typeof output['hld'] === 'string'
+-            ? output['hld']
+-            : JSON.stringify(output['hld']);
++          typeof output['hld'] === 'string' ? output['hld'] : JSON.stringify(output['hld']);
+       }
+     }
+ 
+@@ -197,10 +194,8 @@ export const handler = wrapHandler(async (input, logger) => {
+   const now = new Date().toISOString();
+   await projectsService.updateProjectStatus(projectId, 'IN_PROGRESS', now);
+ 
+-  const followOn = [
+-    { type: 'CREATE_ISSUES' as const, projectId, repoFullName, correlationId },
+-  ];
+-  await enqueueWorkItems(followOn, sqsClient);
++  const followOn = [{ type: 'CREATE_ISSUES' as const, projectId, repoFullName, correlationId }];
++  await enqueueWorkItems(followOn, queueBackend);
+ 
+   return { status: 'SUCCESS', output: { followOn } };
+ });
+diff --git a/packages/lambdas/src/handlers/quick-task.ts b/packages/lambdas/src/handlers/quick-task.ts
+index ee8600c..21f0ff1 100644
+--- a/packages/lambdas/src/handlers/quick-task.ts
++++ b/packages/lambdas/src/handlers/quick-task.ts
+@@ -1,9 +1,10 @@
+-import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
++import { SSMClient } from '@aws-sdk/client-ssm';
+ import {
+   GitHubConnector,
+   PermanentError,
+   ProjectsService,
++  SqsQueueBackend,
+   TaskGraphsService,
+   createDynamoDBClient,
+   enqueueWorkItems,
+@@ -14,6 +15,7 @@ import { wrapHandler } from '../shared/handler-wrapper.js';
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const projectsService = new ProjectsService(dynamoClient);
+ const taskGraphsService = new TaskGraphsService(dynamoClient);
+@@ -23,10 +25,8 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+-  const issueNumber =
+-    typeof input['issueNumber'] === 'number' ? input['issueNumber'] : undefined;
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const issueNumber = typeof input['issueNumber'] === 'number' ? input['issueNumber'] : undefined;
+   const issueBody = typeof input['issueBody'] === 'string' ? input['issueBody'] : '';
+ 
+   if (!projectId || !repoFullName || issueNumber === undefined) {
+@@ -98,7 +98,7 @@ export const handler = wrapHandler(async (input, logger) => {
+     },
+   ];
+ 
+-  await enqueueWorkItems(followOn, sqsClient);
++  await enqueueWorkItems(followOn, queueBackend);
+ 
+   logger.info('quick-task complete', { projectId, taskId, issueNumber });
+   return { status: 'SUCCESS', output: { followOn } };
+diff --git a/packages/lambdas/src/handlers/rebase-pr.ts b/packages/lambdas/src/handlers/rebase-pr.ts
+index 3f8ef83..69ea91a 100644
+--- a/packages/lambdas/src/handlers/rebase-pr.ts
++++ b/packages/lambdas/src/handlers/rebase-pr.ts
+@@ -1,15 +1,17 @@
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
++  PermanentError,
++  SqsQueueBackend,
+   TaskGraphsService,
++  createDynamoDBClient,
+   enqueueWorkItems,
+-  PermanentError,
+ } from '@telos/core';
++import { pollEcsTask, startEcsTask } from '../shared/ecs-task-runner.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+-import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const taskGraphsService = new TaskGraphsService(dynamoClient);
+ 
+@@ -18,11 +20,9 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+   const taskId = typeof input['taskId'] === 'string' ? input['taskId'] : undefined;
+-  const prNumber =
+-    typeof input['prNumber'] === 'number' ? input['prNumber'] : undefined;
++  const prNumber = typeof input['prNumber'] === 'number' ? input['prNumber'] : undefined;
+ 
+   if (!projectId || !repoFullName || !taskId || prNumber === undefined) {
+     throw new PermanentError('Missing required fields: projectId, repoFullName, taskId, prNumber');
+@@ -102,6 +102,6 @@ export const handler = wrapHandler(async (input, logger) => {
+       prNumber,
+     },
+   ];
+-  await enqueueWorkItems(followOn, sqsClient);
++  await enqueueWorkItems(followOn, queueBackend);
+   return { status: 'SUCCESS', output: { followOn } };
+ });
+diff --git a/packages/lambdas/src/handlers/reconcile-enqueuer.ts b/packages/lambdas/src/handlers/reconcile-enqueuer.ts
+index 8906be7..92f15d8 100644
+--- a/packages/lambdas/src/handlers/reconcile-enqueuer.ts
++++ b/packages/lambdas/src/handlers/reconcile-enqueuer.ts
+@@ -1,9 +1,15 @@
+ import { SQSClient } from '@aws-sdk/client-sqs';
+-import { ProjectsService, createDynamoDBClient, enqueueWorkItems } from '@telos/core';
++import {
++  ProjectsService,
++  SqsQueueBackend,
++  createDynamoDBClient,
++  enqueueWorkItems,
++} from '@telos/core';
+ import { v4 as uuidv4 } from 'uuid';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const projectsService = new ProjectsService(dynamoClient);
+ 
+@@ -30,5 +36,5 @@ export const handler = async (_event: unknown): Promise<void> => {
+     correlationId: uuidv4(),
+   }));
+ 
+-  await enqueueWorkItems(workItems, sqsClient);
++  await enqueueWorkItems(workItems, queueBackend);
+ };
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 48691b3..93df246 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -1,11 +1,12 @@
+ import { DescribeTasksCommand, ECSClient } from '@aws-sdk/client-ecs';
+-import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
++import { SSMClient } from '@aws-sdk/client-ssm';
+ import {
+   GitHubConnector,
+   PermanentError,
+   ProjectsService,
+   RunsService,
++  SqsQueueBackend,
+   TaskGraphsService,
+   createDynamoDBClient,
+   enqueueWorkItems,
+@@ -16,6 +17,7 @@ import { wrapHandler } from '../shared/handler-wrapper.js';
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const projectsService = new ProjectsService(dynamoClient);
+ const taskGraphsService = new TaskGraphsService(dynamoClient);
+@@ -27,8 +29,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+ 
+   if (!projectId || !repoFullName) {
+     throw new PermanentError('Missing required fields: projectId, repoFullName');
+@@ -79,9 +80,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const allTasks = await taskGraphsService.getGraph(projectId);
+ 
+   // --- Stuck task check and orphaned ECS run detection ---
+-  const activeTasks = allTasks.filter(
+-    (t) => t.status === 'IN_PROGRESS' || t.status === 'REVIEW',
+-  );
++  const activeTasks = allTasks.filter((t) => t.status === 'IN_PROGRESS' || t.status === 'REVIEW');
+ 
+   for (const task of activeTasks) {
+     const runs = await runsService.queryRunsByProjectAndTask(projectId, task.taskId);
+@@ -206,8 +205,7 @@ export const handler = wrapHandler(async (input, logger) => {
+ 
+   // --- Project completion check ---
+   const finalTasks = await taskGraphsService.getGraph(projectId);
+-  const allCompleted =
+-    finalTasks.length > 0 && finalTasks.every((t) => t.status === 'COMPLETED');
++  const allCompleted = finalTasks.length > 0 && finalTasks.every((t) => t.status === 'COMPLETED');
+   const hasActiveTasks = finalTasks.some(
+     (t) => t.status === 'PENDING' || t.status === 'IN_PROGRESS' || t.status === 'REVIEW',
+   );
+@@ -236,7 +234,7 @@ export const handler = wrapHandler(async (input, logger) => {
+ 
+   const followOn = [...triggerItems, ...updateStatusItems];
+   if (followOn.length > 0) {
+-    await enqueueWorkItems(followOn, sqsClient);
++    await enqueueWorkItems(followOn, queueBackend);
+   }
+ 
+   logger.info('Reconcile complete', { projectId, followOnCount: followOn.length });
+diff --git a/packages/lambdas/src/handlers/review-pr.ts b/packages/lambdas/src/handlers/review-pr.ts
+index 0af92e2..0b399b5 100644
+--- a/packages/lambdas/src/handlers/review-pr.ts
++++ b/packages/lambdas/src/handlers/review-pr.ts
+@@ -1,20 +1,22 @@
+-import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
++import { SSMClient } from '@aws-sdk/client-ssm';
+ import {
+-  createDynamoDBClient,
+-  TaskGraphsService,
+   GitHubConnector,
+-  enqueueWorkItems,
+   PermanentError,
++  SqsQueueBackend,
++  TaskGraphsService,
++  createDynamoDBClient,
++  enqueueWorkItems,
+ } from '@telos/core';
++import { pollEcsTask, startEcsTask } from '../shared/ecs-task-runner.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+-import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ const MAX_REVISION_CYCLES = 3;
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const taskGraphsService = new TaskGraphsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+@@ -24,11 +26,9 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+   const taskId = typeof input['taskId'] === 'string' ? input['taskId'] : undefined;
+-  const prNumber =
+-    typeof input['prNumber'] === 'number' ? input['prNumber'] : undefined;
++  const prNumber = typeof input['prNumber'] === 'number' ? input['prNumber'] : undefined;
+ 
+   if (!projectId || !repoFullName || !taskId || prNumber === undefined) {
+     throw new PermanentError('Missing required fields: projectId, repoFullName, taskId, prNumber');
+@@ -108,13 +108,9 @@ export const handler = wrapHandler(async (input, logger) => {
+ 
+   // COMPLETED — read review output
+   const decision =
+-    typeof pollResult.output?.['decision'] === 'string'
+-      ? pollResult.output['decision']
+-      : undefined;
++    typeof pollResult.output?.['decision'] === 'string' ? pollResult.output['decision'] : undefined;
+   const reviewBody =
+-    typeof pollResult.output?.['reviewBody'] === 'string'
+-      ? pollResult.output['reviewBody']
+-      : '';
++    typeof pollResult.output?.['reviewBody'] === 'string' ? pollResult.output['reviewBody'] : '';
+ 
+   if (!decision) {
+     throw new PermanentError('Reviewer ECS output missing decision');
+@@ -135,7 +131,7 @@ export const handler = wrapHandler(async (input, logger) => {
+         prNumber,
+       },
+     ];
+-    await enqueueWorkItems(followOn, sqsClient);
++    await enqueueWorkItems(followOn, queueBackend);
+     return { status: 'SUCCESS', output: { followOn } };
+   }
+ 
+@@ -155,7 +151,7 @@ export const handler = wrapHandler(async (input, logger) => {
+         prNumber,
+       },
+     ];
+-    await enqueueWorkItems(followOn, sqsClient);
++    await enqueueWorkItems(followOn, queueBackend);
+     return { status: 'SUCCESS', output: { followOn } };
+   }
+ 
+@@ -189,6 +185,6 @@ export const handler = wrapHandler(async (input, logger) => {
+       reviewBody,
+     },
+   ];
+-  await enqueueWorkItems(followOn, sqsClient);
++  await enqueueWorkItems(followOn, queueBackend);
+   return { status: 'SUCCESS', output: { followOn } };
+ });
+diff --git a/packages/lambdas/src/handlers/revise-pr.ts b/packages/lambdas/src/handlers/revise-pr.ts
+index 34bfb02..ed4c239 100644
+--- a/packages/lambdas/src/handlers/revise-pr.ts
++++ b/packages/lambdas/src/handlers/revise-pr.ts
+@@ -1,18 +1,20 @@
+-import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
++import { SSMClient } from '@aws-sdk/client-ssm';
+ import {
+-  createDynamoDBClient,
+-  TaskGraphsService,
+   GitHubConnector,
+-  enqueueWorkItems,
+   PermanentError,
++  SqsQueueBackend,
++  TaskGraphsService,
++  createDynamoDBClient,
++  enqueueWorkItems,
+ } from '@telos/core';
++import { pollEcsTask, startEcsTask } from '../shared/ecs-task-runner.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+-import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const taskGraphsService = new TaskGraphsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+@@ -22,13 +24,10 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+   const taskId = typeof input['taskId'] === 'string' ? input['taskId'] : undefined;
+-  const prNumber =
+-    typeof input['prNumber'] === 'number' ? input['prNumber'] : undefined;
+-  const reviewBody =
+-    typeof input['reviewBody'] === 'string' ? input['reviewBody'] : '';
++  const prNumber = typeof input['prNumber'] === 'number' ? input['prNumber'] : undefined;
++  const reviewBody = typeof input['reviewBody'] === 'string' ? input['reviewBody'] : '';
+ 
+   if (!projectId || !repoFullName || !taskId || prNumber === undefined) {
+     throw new PermanentError('Missing required fields: projectId, repoFullName, taskId, prNumber');
+@@ -135,6 +134,6 @@ export const handler = wrapHandler(async (input, logger) => {
+       prNumber,
+     },
+   ];
+-  await enqueueWorkItems(followOn, sqsClient);
++  await enqueueWorkItems(followOn, queueBackend);
+   return { status: 'SUCCESS', output: { followOn } };
+ });
+diff --git a/packages/lambdas/src/handlers/trigger-task.ts b/packages/lambdas/src/handlers/trigger-task.ts
+index efee4a4..9660726 100644
+--- a/packages/lambdas/src/handlers/trigger-task.ts
++++ b/packages/lambdas/src/handlers/trigger-task.ts
+@@ -1,15 +1,17 @@
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
++  PermanentError,
++  SqsQueueBackend,
+   TaskGraphsService,
++  createDynamoDBClient,
+   enqueueWorkItems,
+-  PermanentError,
+ } from '@telos/core';
++import { pollEcsTask, startEcsTask } from '../shared/ecs-task-runner.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+-import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ const dynamoClient = createDynamoDBClient();
+ const taskGraphsService = new TaskGraphsService(dynamoClient);
+ 
+@@ -18,8 +20,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const projectId = typeof input['projectId'] === 'string' ? input['projectId'] : undefined;
+   const repoFullName =
+     typeof input['repoFullName'] === 'string' ? input['repoFullName'] : undefined;
+-  const correlationId =
+-    typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
++  const correlationId = typeof input['correlationId'] === 'string' ? input['correlationId'] : '';
+   const taskId = typeof input['taskId'] === 'string' ? input['taskId'] : undefined;
+ 
+   if (!projectId || !repoFullName || !taskId) {
+@@ -99,7 +100,7 @@ export const handler = wrapHandler(async (input, logger) => {
+       prNumber,
+     },
+   ];
+-  await enqueueWorkItems(followOn, sqsClient);
++  await enqueueWorkItems(followOn, queueBackend);
+ 
+   logger.info('Developer task completed, PR created', { projectId, taskId, prNumber });
+   return { status: 'SUCCESS', output: { followOn } };
+diff --git a/packages/lambdas/src/handlers/webhook-handler.ts b/packages/lambdas/src/handlers/webhook-handler.ts
+index 74b5e1a..78a7e99 100644
+--- a/packages/lambdas/src/handlers/webhook-handler.ts
++++ b/packages/lambdas/src/handlers/webhook-handler.ts
+@@ -1,13 +1,14 @@
+ import { createHmac, timingSafeEqual } from 'node:crypto';
+-import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
++import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
++import { SqsQueueBackend, enqueueWorkItems, getConfig } from '@telos/core';
+ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+ import { v4 as uuidv4 } from 'uuid';
+-import { enqueueWorkItems, getConfig } from '@telos/core';
+ 
+ // Module-level clients and cache — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const queueBackend = new SqsQueueBackend(sqsClient);
+ let cachedWebhookSecret: string | undefined;
+ 
+ async function getWebhookSecret(): Promise<string> {
+@@ -146,7 +147,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
+           ...(sourceRepoName !== undefined ? { sourceRepoName } : {}),
+         },
+       ],
+-      sqsClient,
++      queueBackend,
+     );
+ 
+     return respond(200, { enqueued: true, type: 'BOOTSTRAP_PROJECT', correlationId });
+@@ -174,8 +175,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
+ 
+     const comment = commentRaw as Record<string, unknown>;
+     const issue = issueRaw as Record<string, unknown>;
+-    const commentBody =
+-      typeof comment['body'] === 'string' ? comment['body'].trim() : '';
++    const commentBody = typeof comment['body'] === 'string' ? comment['body'].trim() : '';
+     const issueNumber = issue['number'];
+ 
+     if (typeof issueNumber !== 'number') {
+@@ -196,7 +196,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
+             issueNumber,
+           },
+         ],
+-        sqsClient,
++        queueBackend,
+       );
+ 
+       return respond(200, { enqueued: true, type: 'ENRICH_ISSUE', correlationId });
+@@ -216,7 +216,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
+             taskId: String(issueNumber),
+           },
+         ],
+-        sqsClient,
++        queueBackend,
+       );
+ 
+       return respond(200, { enqueued: true, type: 'TRIGGER_TASK', correlationId });
