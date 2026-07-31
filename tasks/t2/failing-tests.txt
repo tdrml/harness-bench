@@ -1,0 +1,11 @@
+createLogger() > child context merges with per-call context, per-call wins 1ms
+createLogger() > child logger inherits correlationId 1ms
+createLogger() > child logger merges additional context with parent context 1ms
+createLogger() > filters all but ERROR when LOG_LEVEL is ERROR 4ms
+createLogger() > filters out DEBUG and INFO when LOG_LEVEL is WARN 7ms
+createLogger() > filters out DEBUG messages when LOG_LEVEL is INFO 1ms
+createLogger() > includes required fields: timestamp, level, message, correlationId 2ms
+createLogger() > logs at DEBUG level 2ms
+createLogger() > merges arbitrary context fields into the log entry 2ms
+createLogger() > outputs valid JSON to stdout 32ms
+createLogger() > works without a correlationId 1ms

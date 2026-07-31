@@ -1,0 +1,4 @@
+.pristine-telos/
+runs/
+.claude-bench-config/
+node_modules/

@@ -1,0 +1,2 @@
+evaluateMergePolicy > returns REBASE when PR has conflicts and is not approved 2ms
+evaluateMergePolicy > returns REBASE when PR has conflicts, regardless of approval 32ms

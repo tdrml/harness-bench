@@ -1,0 +1,2 @@
+GitHubConnector > createIssue > wraps 429 as RetryableError 3ms
+GitHubConnector > getInstallationOctokit > wraps 429 from getRepoInstallation as RetryableError 14ms
