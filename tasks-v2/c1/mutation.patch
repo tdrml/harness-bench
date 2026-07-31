@@ -1,0 +1,39 @@
+diff --git a/packages/core/src/errors/index.ts b/packages/core/src/errors/index.ts
+index b93ca4d..01ee3a9 100644
+--- a/packages/core/src/errors/index.ts
++++ b/packages/core/src/errors/index.ts
+@@ -17,7 +17,7 @@ export class TelosError extends Error {
+ 
+ export class RetryableError extends TelosError {
+   constructor(message: string, cause?: Error) {
+-    super(message, 'RETRYABLE_ERROR', cause);
++    super(message, 'RETRYABLE', cause);
+   }
+ }
+ 
+diff --git a/packages/core/src/github/index.ts b/packages/core/src/github/index.ts
+index 873f0d0..966a02d 100644
+--- a/packages/core/src/github/index.ts
++++ b/packages/core/src/github/index.ts
+@@ -11,7 +11,7 @@ export type { GitHubIssue, GitHubPR };
+ function wrapOctokitError(err: unknown, context: string): never {
+   if (err instanceof RequestError) {
+     const status = err.status;
+-    if (status === 429 || status >= 500) {
++    if (status >= 500) {
+       throw new RetryableError(`GitHub API error (${status}): ${context}`, err as Error);
+     }
+     if (status >= 400) {
+diff --git a/packages/core/src/logger/index.ts b/packages/core/src/logger/index.ts
+index 15c84e6..78fe852 100644
+--- a/packages/core/src/logger/index.ts
++++ b/packages/core/src/logger/index.ts
+@@ -33,7 +33,7 @@ function createLoggerInternal(
+     context?: Record<string, unknown>,
+   ): void {
+     const minLevel = getMinLevel();
+-    if (LOG_LEVEL_ORDER[level] < LOG_LEVEL_ORDER[minLevel]) {
++    if (LOG_LEVEL_ORDER[level] <= LOG_LEVEL_ORDER[minLevel]) {
+       return;
+     }
+     const entry: Record<string, unknown> = {

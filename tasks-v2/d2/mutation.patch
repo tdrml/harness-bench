@@ -1,0 +1,13 @@
+diff --git a/packages/core/src/dynamodb/runs.ts b/packages/core/src/dynamodb/runs.ts
+index 19f7e1d..bb1e012 100644
+--- a/packages/core/src/dynamodb/runs.ts
++++ b/packages/core/src/dynamodb/runs.ts
+@@ -63,7 +63,7 @@ export class RunsService {
+     const result = await this.client.send(
+       new QueryCommand({
+         TableName: this.tableName,
+-        IndexName: 'projectId-taskId-index',
++        IndexName: 'projectId-index',
+         KeyConditionExpression: 'projectId = :projectId AND taskId = :taskId',
+         ExpressionAttributeValues: { ':projectId': projectId, ':taskId': taskId },
+       }),

@@ -1,0 +1,13 @@
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index 443bb4d..09b86e4 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -34,7 +34,7 @@ export async function enqueueWorkItems(items: WorkItem[], sqsClient: SQSClient):
+       Entries: batch.map((item, index) => ({
+         Id: String(index),
+         MessageBody: JSON.stringify(item),
+-        MessageGroupId: item.repoFullName,
++        MessageGroupId: batch[0].repoFullName,
+       })),
+     });
+     await sqsClient.send(command);

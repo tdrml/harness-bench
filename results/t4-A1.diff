@@ -1,0 +1,13 @@
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index 5e15fac..443bb4d 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -28,7 +28,7 @@ export async function enqueueWorkItems(items: WorkItem[], sqsClient: SQSClient):
+   }
+ 
+   for (let i = 0; i < items.length; i += BATCH_SIZE) {
+-    const batch = items.slice(i, BATCH_SIZE);
++    const batch = items.slice(i, i + BATCH_SIZE);
+     const command = new SendMessageBatchCommand({
+       QueueUrl: queueUrl,
+       Entries: batch.map((item, index) => ({

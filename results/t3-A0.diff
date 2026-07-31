@@ -1,0 +1,13 @@
+diff --git a/packages/core/src/github/index.ts b/packages/core/src/github/index.ts
+index 966a02d..9b06864 100644
+--- a/packages/core/src/github/index.ts
++++ b/packages/core/src/github/index.ts
+@@ -11,7 +11,7 @@ export type { GitHubIssue, GitHubPR };
+ function wrapOctokitError(err: unknown, context: string): never {
+   if (err instanceof RequestError) {
+     const status = err.status;
+-    if (status >= 500) {
++    if (status >= 500 || status === 429) {
+       throw new RetryableError(`GitHub API error (${status}): ${context}`, err as Error);
+     }
+     if (status >= 400) {
