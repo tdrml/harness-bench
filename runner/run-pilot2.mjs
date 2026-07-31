@@ -178,10 +178,14 @@ ${diff || '(empty diff - the agent changed nothing)'}
 --- UNTRACKED/STATUS ---
 ${status || '(clean)'}
 
-Reply with ONLY a raw JSON object on one line - no code fences, no other text:
+You may read repository files to check the diff's claims. Your FINAL message must be ONLY a raw JSON object on one line - no code fences, no other text:
 {"verdict": "APPROVE" | "REQUEST_CHANGES", "issues": string[]}`;
-  const r = claude(workdir, prompt, modelId, { maxTurns: 4, timeoutS: 300 });
-  return { ...r, verdict: extractJson(r.text) };
+  // maxTurns 4 → 20 (mid-pilot patch, journaled as a note event): reviewers
+  // legitimately Read files before judging and were dying on the turn cap
+  // with stop_reason=tool_use and no verdict at all.
+  const r = claude(workdir, prompt, modelId, { maxTurns: 20, timeoutS: 600 });
+  const verdict = r.ok ? extractJson(r.text) : null;
+  return { ...r, verdict };
 }
 
 function score(workdir, task) {
