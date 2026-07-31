@@ -1,0 +1,32 @@
+diff --git a/packages/core/src/merge-policy/index.ts b/packages/core/src/merge-policy/index.ts
+index 1bea6f7..e7520f0 100644
+--- a/packages/core/src/merge-policy/index.ts
++++ b/packages/core/src/merge-policy/index.ts
+@@ -10,10 +10,11 @@ export interface MergePolicyParams {
+   prApproved: boolean;
+   hasConflicts: boolean;
+   predecessorsMerged: boolean;
++  ciGreen?: boolean;
+ }
+ 
+ export function evaluateMergePolicy(params: MergePolicyParams): MergePolicyResult {
+-  const { prApproved, hasConflicts, predecessorsMerged } = params;
++  const { prApproved, hasConflicts, predecessorsMerged, ciGreen = true } = params;
+ 
+   if (hasConflicts) {
+     return {
+@@ -31,6 +32,14 @@ export function evaluateMergePolicy(params: MergePolicyParams): MergePolicyResul
+     };
+   }
+ 
++  if (!ciGreen) {
++    return {
++      canMerge: false,
++      reason: 'CI is not green',
++      action: 'WAIT',
++    };
++  }
++
+   if (!predecessorsMerged) {
+     return {
+       canMerge: false,

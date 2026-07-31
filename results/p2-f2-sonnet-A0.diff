@@ -1,0 +1,22 @@
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index 443bb4d..0ba3637 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -1,4 +1,5 @@
+ import { SendMessageBatchCommand, type SQSClient } from '@aws-sdk/client-sqs';
++import { RetryableError } from '../errors/index.js';
+ import type { WorkItem } from './work-items.js';
+ 
+ export { WorkItemSchema, type WorkItem, type WorkItemBase } from './work-items.js';
+@@ -37,6 +38,10 @@ export async function enqueueWorkItems(items: WorkItem[], sqsClient: SQSClient):
+         MessageGroupId: item.repoFullName,
+       })),
+     });
+-    await sqsClient.send(command);
++    const result = await sqsClient.send(command);
++    if (result.Failed && result.Failed.length > 0) {
++      const failedIds = result.Failed.map((failure) => failure.Id).join(', ');
++      throw new RetryableError(`Failed to enqueue work items with Ids: ${failedIds}`);
++    }
+   }
+ }

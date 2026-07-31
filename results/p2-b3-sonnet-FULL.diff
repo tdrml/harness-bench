@@ -1,0 +1,13 @@
+diff --git a/packages/core/src/logger/index.ts b/packages/core/src/logger/index.ts
+index e6a49cd..5e8a942 100644
+--- a/packages/core/src/logger/index.ts
++++ b/packages/core/src/logger/index.ts
+@@ -17,7 +17,7 @@ export interface Logger {
+ 
+ function getMinLevel(): LogLevel {
+   const raw = process.env['LOG_LEVEL'];
+-  if (raw) {
++  if (raw && Object.prototype.hasOwnProperty.call(LOG_LEVEL_ORDER, raw)) {
+     return raw as LogLevel;
+   }
+   return 'INFO';
