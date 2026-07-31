@@ -44,6 +44,16 @@ const HOLDOUT_DEST = {
 const argv = process.argv.slice(2);
 const only = argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : null;
 
+// Host-OOM mitigation (2026-07-31): the L1:sonnet:FULL cell thrashed the 16 GB
+// WSL VM to death - telos's vitest pool (12 workers, CDK synth each) stacked on
+// a headless claude run exhausted RAM + swap with no OOM kill. Cap the worker
+// pools for every child (the agent's own test runs, the Stop-hook gate, and the
+// scorer all inherit this env). Pair with a MemoryMax'd scope at launch.
+process.env.VITEST_MAX_THREADS = '4';
+process.env.VITEST_MIN_THREADS = '1';
+process.env.VITEST_MAX_FORKS = '4';
+process.env.VITEST_MIN_FORKS = '1';
+
 mkdirSync(RESULTS, { recursive: true });
 
 let globalCost = PRIOR_SPEND_USD;
