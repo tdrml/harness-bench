@@ -31,7 +31,7 @@ const PLANS = join(ROOT, 'results', 'plans');
 const JOURNAL = join(RESULTS, 'pilot4.jsonl');
 const PINNED_SHA = 'c62bcf6420c24c7e43c078d72aade6afcf25a765';
 
-const MODELS = { sonnet: 'claude-sonnet-5', haiku: 'claude-haiku-4-5-20251001' };
+const MODELS = { opus: 'claude-opus-5', sonnet: 'claude-sonnet-5', haiku: 'claude-haiku-4-5-20251001' };
 const EXECUTOR = 'haiku';
 const GLOBAL_CEILING_USD = 200.0;
 const PRIOR_SPEND_USD = 39.03; // pilots 1-3
@@ -44,6 +44,9 @@ const CELLS = [
   { plan: 'sonnet', arm: 'A0' },
   { plan: 'sonnet', arm: 'FULL' },
   { plan: 'haiku', arm: 'A0' },
+  // opus added mid-pilot (2026-07-31, Thomas): planner-tier dose-response on the
+  // unharnessed executor. opus x FULL deliberately deferred until A0 shows signal.
+  { plan: 'opus', arm: 'A0' },
 ];
 const REPS = 2;
 
@@ -188,7 +191,7 @@ Write the plan as markdown with exactly these sections:
 4. **Acceptance checklist** - how the engineer verifies each requirement before declaring done (commands included).
 
 Do NOT write the implementation code itself. Plan only. Your final message must be ONLY the plan markdown.`;
-  const r = claude(workdir, prompt, MODELS[plannerModel], { maxTurns: 60, timeoutS: 1200 });
+  const r = claude(workdir, prompt, MODELS[plannerModel], { maxTurns: 60, timeoutS: 1800 });
   rmSync(workdir, { recursive: true, force: true });
   if (!r.ok || !r.text || r.text.length < 400) {
     journal({ event: 'plan', task, planner: plannerModel, costUsd: r.cost, ok: false });

@@ -1,0 +1,2 @@
+{"event":"plan","task":"L1","planner":"sonnet","costUsd":1.5222771,"turns":45,"wallS":246,"chars":18914}
+{"event": "note", "ts": "2026-07-31", "note": "Grid extended mid-pilot (before any opus cell ran): opus added as a third planner tier - cells {opus-plan x A0 x L1-L3 x n=2}. Rationale: planner-tier dose-response on the unharnessed executor; opus x FULL deferred until A0 shows signal. Opus model id probed OK on bench credentials ($0.12). The running 18-run grid is unaffected; opus cells run via resume after it completes. Planner timeout raised 1200->1800s for opus."}
