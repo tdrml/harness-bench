@@ -54,19 +54,14 @@ const CONCURRENCY = 2;
 const REPS = 3;
 
 const TASKS = [
-  { id: 'tb1', repo: 'telos', cls: 'breadth' },
-  { id: 'ts1', repo: 'telos', cls: 'spec' },
-  { id: 'ts2', repo: 'telos', cls: 'spec' },
-  { id: 'ab1', repo: 'autograph', cls: 'breadth' },
-  { id: 'ab2', repo: 'autograph', cls: 'breadth' },
-  { id: 'as1', repo: 'autograph', cls: 'spec' },
+  { id: 'tb1', repo: 'telos', cls: 'breadth', dir: 'tasks-v3' },
+  { id: 'ab1', repo: 'autograph', cls: 'breadth', dir: 'tasks-v3' },
+  { id: 'tb2', repo: 'telos', cls: 'breadth', dir: 'tasks-v4' },
+  { id: 'ab3', repo: 'autograph', cls: 'breadth', dir: 'tasks-v4' },
 ];
-const CELLS = [
-  { plan: null, arm: 'A0' },
-  { plan: null, arm: 'FULL' },
-  { plan: PLANNER, arm: 'A0' },
-  { plan: PLANNER, arm: 'FULL' },
-];
+const TIERS = ['haiku', 'sonnet', 'opus'];
+const CELLS = [];
+for (const model of TIERS) for (const arm of ['A0', 'FULL']) CELLS.push({ model, plan: null, arm });
 
 process.env.VITEST_MAX_THREADS = '4';
 process.env.VITEST_MIN_THREADS = '1';
