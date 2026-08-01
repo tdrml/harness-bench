@@ -1,0 +1,558 @@
+diff --git a/packages/cdk/__tests__/__snapshots__/telos-stack.test.ts.snap b/packages/cdk/__tests__/__snapshots__/telos-stack.test.ts.snap
+index efbf99e..268bcb8 100644
+--- a/packages/cdk/__tests__/__snapshots__/telos-stack.test.ts.snap
++++ b/packages/cdk/__tests__/__snapshots__/telos-stack.test.ts.snap
+@@ -1059,6 +1059,260 @@ exports[`TelosStack > matches the snapshot 1`] = `
+       },
+       "Type": "AWS::IAM::Policy",
+     },
++    "EcsTaskDefinitionsDocumenterLogGroup9A56E7DC": {
++      "DeletionPolicy": "Delete",
++      "Properties": {
++        "LogGroupName": "/telos/ecs/documenter",
++        "RetentionInDays": 30,
++      },
++      "Type": "AWS::Logs::LogGroup",
++      "UpdateReplacePolicy": "Delete",
++    },
++    "EcsTaskDefinitionsDocumenterTaskDefBD660F45": {
++      "Properties": {
++        "ContainerDefinitions": [
++          {
++            "Environment": [
++              {
++                "Name": "TASK_TYPE",
++                "Value": "documenter",
++              },
++              {
++                "Name": "GITHUB_PRIVATE_KEY_PARAM",
++                "Value": "/telos/github/private-key",
++              },
++              {
++                "Name": "ANTHROPIC_API_KEY_PARAM",
++                "Value": "/telos/anthropic/api-key",
++              },
++              {
++                "Name": "DYNAMODB_TABLE_TASK_OUTPUTS",
++                "Value": {
++                  "Ref": "DynamoDbTablesTaskOutputsTableBDDEA7D8",
++                },
++              },
++              {
++                "Name": "DYNAMODB_TABLE_TASK_GRAPHS",
++                "Value": {
++                  "Ref": "DynamoDbTablesTaskGraphsTable1D0A1DFC",
++                },
++              },
++            ],
++            "Essential": true,
++            "Image": {
++              "Fn::Join": [
++                "",
++                [
++                  {
++                    "Fn::Select": [
++                      4,
++                      {
++                        "Fn::Split": [
++                          ":",
++                          {
++                            "Fn::GetAtt": [
++                              "EcrRepoRepository87F26BDA",
++                              "Arn",
++                            ],
++                          },
++                        ],
++                      },
++                    ],
++                  },
++                  ".dkr.ecr.",
++                  {
++                    "Fn::Select": [
++                      3,
++                      {
++                        "Fn::Split": [
++                          ":",
++                          {
++                            "Fn::GetAtt": [
++                              "EcrRepoRepository87F26BDA",
++                              "Arn",
++                            ],
++                          },
++                        ],
++                      },
++                    ],
++                  },
++                  ".",
++                  {
++                    "Ref": "AWS::URLSuffix",
++                  },
++                  "/",
++                  {
++                    "Ref": "EcrRepoRepository87F26BDA",
++                  },
++                  ":latest",
++                ],
++              ],
++            },
++            "LogConfiguration": {
++              "LogDriver": "awslogs",
++              "Options": {
++                "awslogs-group": {
++                  "Ref": "EcsTaskDefinitionsDocumenterLogGroup9A56E7DC",
++                },
++                "awslogs-region": "us-east-1",
++                "awslogs-stream-prefix": "documenter",
++              },
++            },
++            "Name": "telos-documenter",
++          },
++        ],
++        "Cpu": "1024",
++        "ExecutionRoleArn": {
++          "Fn::GetAtt": [
++            "EcsTaskDefinitionsTaskExecutionRoleA9BB4A5E",
++            "Arn",
++          ],
++        },
++        "Family": "telos-documenter",
++        "Memory": "4096",
++        "NetworkMode": "awsvpc",
++        "RequiresCompatibilities": [
++          "FARGATE",
++        ],
++        "RuntimePlatform": {
++          "CpuArchitecture": "ARM64",
++          "OperatingSystemFamily": "LINUX",
++        },
++        "TaskRoleArn": {
++          "Fn::GetAtt": [
++            "EcsTaskDefinitionsDocumenterTaskRole2490AD7C",
++            "Arn",
++          ],
++        },
++      },
++      "Type": "AWS::ECS::TaskDefinition",
++    },
++    "EcsTaskDefinitionsDocumenterTaskRole2490AD7C": {
++      "Properties": {
++        "AssumeRolePolicyDocument": {
++          "Statement": [
++            {
++              "Action": "sts:AssumeRole",
++              "Effect": "Allow",
++              "Principal": {
++                "Service": "ecs-tasks.amazonaws.com",
++              },
++            },
++          ],
++          "Version": "2012-10-17",
++        },
++        "RoleName": "telos-documenter-task-role",
++      },
++      "Type": "AWS::IAM::Role",
++    },
++    "EcsTaskDefinitionsDocumenterTaskRoleDefaultPolicyC4201317": {
++      "Properties": {
++        "PolicyDocument": {
++          "Statement": [
++            {
++              "Action": [
++                "dynamodb:BatchGetItem",
++                "dynamodb:Query",
++                "dynamodb:GetItem",
++                "dynamodb:Scan",
++                "dynamodb:ConditionCheckItem",
++                "dynamodb:BatchWriteItem",
++                "dynamodb:PutItem",
++                "dynamodb:UpdateItem",
++                "dynamodb:DeleteItem",
++                "dynamodb:DescribeTable",
++              ],
++              "Effect": "Allow",
++              "Resource": {
++                "Fn::GetAtt": [
++                  "DynamoDbTablesTaskOutputsTableBDDEA7D8",
++                  "Arn",
++                ],
++              },
++            },
++            {
++              "Action": [
++                "dynamodb:GetRecords",
++                "dynamodb:GetShardIterator",
++              ],
++              "Effect": "Allow",
++              "Resource": {
++                "Fn::GetAtt": [
++                  "DynamoDbTablesTaskOutputsTableBDDEA7D8",
++                  "Arn",
++                ],
++              },
++            },
++            {
++              "Action": [
++                "dynamodb:BatchGetItem",
++                "dynamodb:Query",
++                "dynamodb:GetItem",
++                "dynamodb:Scan",
++                "dynamodb:ConditionCheckItem",
++                "dynamodb:BatchWriteItem",
++                "dynamodb:PutItem",
++                "dynamodb:UpdateItem",
++                "dynamodb:DeleteItem",
++                "dynamodb:DescribeTable",
++              ],
++              "Effect": "Allow",
++              "Resource": {
++                "Fn::GetAtt": [
++                  "DynamoDbTablesTaskGraphsTable1D0A1DFC",
++                  "Arn",
++                ],
++              },
++            },
++            {
++              "Action": [
++                "dynamodb:GetRecords",
++                "dynamodb:GetShardIterator",
++              ],
++              "Effect": "Allow",
++              "Resource": {
++                "Fn::GetAtt": [
++                  "DynamoDbTablesTaskGraphsTable1D0A1DFC",
++                  "Arn",
++                ],
++              },
++            },
++            {
++              "Action": "ssm:GetParameter",
++              "Effect": "Allow",
++              "Resource": "arn:aws:ssm:us-east-1:123456789012:parameter/telos/*",
++            },
++            {
++              "Action": [
++                "ecr:BatchCheckLayerAvailability",
++                "ecr:GetDownloadUrlForLayer",
++                "ecr:BatchGetImage",
++              ],
++              "Effect": "Allow",
++              "Resource": {
++                "Fn::GetAtt": [
++                  "EcrRepoRepository87F26BDA",
++                  "Arn",
++                ],
++              },
++            },
++            {
++              "Action": "ecr:GetAuthorizationToken",
++              "Effect": "Allow",
++              "Resource": "*",
++            },
++          ],
++          "Version": "2012-10-17",
++        },
++        "PolicyName": "EcsTaskDefinitionsDocumenterTaskRoleDefaultPolicyC4201317",
++        "Roles": [
++          {
++            "Ref": "EcsTaskDefinitionsDocumenterTaskRole2490AD7C",
++          },
++        ],
++      },
++      "Type": "AWS::IAM::Policy",
++    },
+     "EcsTaskDefinitionsPlannerLogGroup24AB5D8F": {
+       "DeletionPolicy": "Delete",
+       "Properties": {
+@@ -2208,6 +2462,19 @@ exports[`TelosStack > matches the snapshot 1`] = `
+                 ],
+               },
+             },
++            {
++              "Action": [
++                "logs:CreateLogStream",
++                "logs:PutLogEvents",
++              ],
++              "Effect": "Allow",
++              "Resource": {
++                "Fn::GetAtt": [
++                  "EcsTaskDefinitionsDocumenterLogGroup9A56E7DC",
++                  "Arn",
++                ],
++              },
++            },
+           ],
+           "Version": "2012-10-17",
+         },
+diff --git a/packages/cdk/__tests__/telos-stack.test.ts b/packages/cdk/__tests__/telos-stack.test.ts
+index 90f8a24..d93efb2 100644
+--- a/packages/cdk/__tests__/telos-stack.test.ts
++++ b/packages/cdk/__tests__/telos-stack.test.ts
+@@ -283,9 +283,9 @@ describe('TelosStack', () => {
+   });
+ 
+   // ECS task definition tests
+-  it('creates 6 ECS task definitions', () => {
++  it('creates 7 ECS task definitions', () => {
+     const template = buildTemplate();
+-    template.resourceCountIs('AWS::ECS::TaskDefinition', 6);
++    template.resourceCountIs('AWS::ECS::TaskDefinition', 7);
+   });
+ 
+   it('creates ECS task definition for each worker type', () => {
+@@ -297,6 +297,7 @@ describe('TelosStack', () => {
+       'telos-reviewer',
+       'telos-reviser',
+       'telos-rebaser',
++      'telos-documenter',
+     ];
+     for (const family of families) {
+       template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+@@ -327,9 +328,9 @@ describe('TelosStack', () => {
+     }
+   });
+ 
+-  it('reviewer and rebaser task definitions have 1 vCPU and 4 GB memory', () => {
++  it('reviewer, rebaser, and documenter task definitions have 1 vCPU and 4 GB memory', () => {
+     const template = buildTemplate();
+-    for (const family of ['telos-reviewer', 'telos-rebaser']) {
++    for (const family of ['telos-reviewer', 'telos-rebaser', 'telos-documenter']) {
+       template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+         Family: family,
+         Cpu: '1024',
+@@ -351,7 +352,7 @@ describe('TelosStack', () => {
+ 
+   it('creates CloudWatch log groups for all ECS task types', () => {
+     const template = buildTemplate();
+-    const taskTypes = ['architect', 'planner', 'developer', 'reviewer', 'reviser', 'rebaser'];
++    const taskTypes = ['architect', 'planner', 'developer', 'reviewer', 'reviser', 'rebaser', 'documenter'];
+     for (const taskType of taskTypes) {
+       template.hasResourceProperties('AWS::Logs::LogGroup', {
+         LogGroupName: `/telos/ecs/${taskType}`,
+@@ -375,7 +376,7 @@ describe('TelosStack', () => {
+ 
+   it('creates ECS task roles with DynamoDB access to task-outputs and task-graphs', () => {
+     const template = buildTemplate();
+-    // Verify 6 task roles are created (one per task type)
++    // Verify 7 task roles are created (one per task type)
+     const roles = template.findResources('AWS::IAM::Role', {
+       Properties: {
+         AssumeRolePolicyDocument: {
+@@ -387,8 +388,8 @@ describe('TelosStack', () => {
+         },
+       },
+     });
+-    // Execution role + 6 task roles = at least 7 ECS roles
+-    expect(Object.keys(roles).length).toBeGreaterThanOrEqual(7);
++    // Execution role + 7 task roles = at least 8 ECS roles
++    expect(Object.keys(roles).length).toBeGreaterThanOrEqual(8);
+   });
+ 
+   it('creates shared ECS execution role with AmazonECSTaskExecutionRolePolicy', () => {
+diff --git a/packages/cdk/lib/constructs/ecs-task-definitions.ts b/packages/cdk/lib/constructs/ecs-task-definitions.ts
+index ab561aa..cd3bdc9 100644
+--- a/packages/cdk/lib/constructs/ecs-task-definitions.ts
++++ b/packages/cdk/lib/constructs/ecs-task-definitions.ts
+@@ -6,7 +6,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
+ import { Construct } from 'constructs';
+ import { DynamoDbTables } from './dynamodb-tables.js';
+ 
+-export type TaskType = 'architect' | 'planner' | 'developer' | 'reviewer' | 'reviser' | 'rebaser';
++export type TaskType = 'architect' | 'planner' | 'developer' | 'reviewer' | 'reviser' | 'rebaser' | 'documenter';
+ 
+ interface TaskConfig {
+   taskType: TaskType;
+@@ -21,6 +21,7 @@ const TASK_CONFIGS: TaskConfig[] = [
+   { taskType: 'reviewer', cpu: 1024, memoryMiB: 4096 },
+   { taskType: 'reviser', cpu: 2048, memoryMiB: 8192 },
+   { taskType: 'rebaser', cpu: 1024, memoryMiB: 4096 },
++  { taskType: 'documenter', cpu: 1024, memoryMiB: 4096 },
+ ];
+ 
+ export interface EcsTaskDefinitionsProps {
+diff --git a/packages/core/__tests__/prompts.test.ts b/packages/core/__tests__/prompts.test.ts
+index 01ae94f..ddcfa2e 100644
+--- a/packages/core/__tests__/prompts.test.ts
++++ b/packages/core/__tests__/prompts.test.ts
+@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
+ import {
+   getArchitectPrompt,
+   getDeveloperPrompt,
++  getDocumenterPrompt,
+   getPlannerPrompt,
+   getRebaserPrompt,
+   getReviewerPrompt,
+@@ -400,3 +401,78 @@ describe('getRebaserPrompt', () => {
+     expect(result).not.toContain('Known Conflict Files');
+   });
+ });
++
++// ---------------------------------------------------------------------------
++// getDocumenterPrompt
++// ---------------------------------------------------------------------------
++
++describe('getDocumenterPrompt', () => {
++  const baseParams = {
++    repoFullName: 'acme/platform',
++    correlationId: 'corr-abc123',
++  };
++
++  it('returns a non-empty string', () => {
++    const result = getDocumenterPrompt(baseParams);
++    expect(typeof result).toBe('string');
++    expect(result.length).toBeGreaterThan(0);
++  });
++
++  it('interpolates repoFullName', () => {
++    const result = getDocumenterPrompt(baseParams);
++    expect(result).toContain('acme/platform');
++  });
++
++  it('interpolates correlationId', () => {
++    const result = getDocumenterPrompt(baseParams);
++    expect(result).toContain('corr-abc123');
++  });
++
++  it('includes role definition', () => {
++    const result = getDocumenterPrompt(baseParams);
++    expect(result.toLowerCase()).toContain('documentarian');
++  });
++
++  it('includes docs/OVERVIEW.md as output path', () => {
++    const result = getDocumenterPrompt(baseParams);
++    expect(result).toContain('docs/OVERVIEW.md');
++  });
++
++  it('includes expected output format with overviewPath and summary', () => {
++    const result = getDocumenterPrompt(baseParams);
++    expect(result).toContain('overviewPath');
++    expect(result).toContain('summary');
++  });
++
++  it('includes security guardrails', () => {
++    const result = getDocumenterPrompt(baseParams);
++    expect(result.toLowerCase()).toContain('secret');
++  });
++
++  it('includes prohibited operations', () => {
++    const result = getDocumenterPrompt(baseParams);
++    expect(result.toLowerCase()).toContain('do not commit');
++  });
++
++  it('interpolates optional repoStructure', () => {
++    const result = getDocumenterPrompt({ ...baseParams, repoStructure: 'packages/core\npackages/worker' });
++    expect(result).toContain('packages/core');
++    expect(result).toContain('packages/worker');
++  });
++
++  it('interpolates optional existingOverview', () => {
++    const result = getDocumenterPrompt({ ...baseParams, existingOverview: '# Existing Overview\n## Purpose' });
++    expect(result).toContain('Existing Overview');
++    expect(result).toContain('Purpose');
++  });
++
++  it('omits repo structure section when not provided', () => {
++    const result = getDocumenterPrompt(baseParams);
++    expect(result).not.toContain('Repository Structure');
++  });
++
++  it('omits existing overview section when not provided', () => {
++    const result = getDocumenterPrompt(baseParams);
++    expect(result).not.toContain('Existing Overview');
++  });
++});
+diff --git a/packages/core/__tests__/queue.test.ts b/packages/core/__tests__/queue.test.ts
+index 6000cca..50ea8ac 100644
+--- a/packages/core/__tests__/queue.test.ts
++++ b/packages/core/__tests__/queue.test.ts
+@@ -53,7 +53,7 @@ describe('WorkItemSchema — BOOTSTRAP_PROJECT', () => {
+ });
+ 
+ describe('WorkItemSchema — simple types (no extra fields)', () => {
+-  const simpleTypes = ['BOOTSTRAP_REPO', 'GENERATE_ARCHITECTURE', 'PLAN_TASKS', 'CREATE_ISSUES', 'RECONCILE'];
++  const simpleTypes = ['BOOTSTRAP_REPO', 'GENERATE_ARCHITECTURE', 'GENERATE_DOCS', 'PLAN_TASKS', 'CREATE_ISSUES', 'RECONCILE'];
+ 
+   for (const type of simpleTypes) {
+     it(`accepts valid ${type} item`, () => {
+diff --git a/packages/core/src/prompts/index.ts b/packages/core/src/prompts/index.ts
+index c5bc80f..598e344 100644
+--- a/packages/core/src/prompts/index.ts
++++ b/packages/core/src/prompts/index.ts
+@@ -15,3 +15,6 @@ export type { ReviserPromptParams } from './reviser.js';
+ 
+ export { getRebaserPrompt } from './rebaser.js';
+ export type { RebaserPromptParams } from './rebaser.js';
++
++export { getDocumenterPrompt } from './documenter.js';
++export type { DocumenterPromptParams } from './documenter.js';
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index 443bb4d..5dd14aa 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -6,6 +6,7 @@ export type {
+   BootstrapProjectWorkItem,
+   BootstrapRepoWorkItem,
+   GenerateArchitectureWorkItem,
++  GenerateDocsWorkItem,
+   PlanTasksWorkItem,
+   CreateIssuesWorkItem,
+   TriggerTaskWorkItem,
+diff --git a/packages/core/src/queue/work-items.ts b/packages/core/src/queue/work-items.ts
+index c41c9d7..19ef486 100644
+--- a/packages/core/src/queue/work-items.ts
++++ b/packages/core/src/queue/work-items.ts
+@@ -23,6 +23,10 @@ const GenerateArchitectureSchema = WorkItemBaseSchema.extend({
+   type: z.literal('GENERATE_ARCHITECTURE'),
+ });
+ 
++const GenerateDocsSchema = WorkItemBaseSchema.extend({
++  type: z.literal('GENERATE_DOCS'),
++});
++
+ const PlanTasksSchema = WorkItemBaseSchema.extend({
+   type: z.literal('PLAN_TASKS'),
+ });
+@@ -85,6 +89,7 @@ export const WorkItemSchema = z.discriminatedUnion('type', [
+   BootstrapProjectSchema,
+   BootstrapRepoSchema,
+   GenerateArchitectureSchema,
++  GenerateDocsSchema,
+   PlanTasksSchema,
+   CreateIssuesSchema,
+   TriggerTaskSchema,
+@@ -104,6 +109,7 @@ export type WorkItem = z.infer<typeof WorkItemSchema>;
+ export type BootstrapProjectWorkItem = z.infer<typeof BootstrapProjectSchema>;
+ export type BootstrapRepoWorkItem = z.infer<typeof BootstrapRepoSchema>;
+ export type GenerateArchitectureWorkItem = z.infer<typeof GenerateArchitectureSchema>;
++export type GenerateDocsWorkItem = z.infer<typeof GenerateDocsSchema>;
+ export type PlanTasksWorkItem = z.infer<typeof PlanTasksSchema>;
+ export type CreateIssuesWorkItem = z.infer<typeof CreateIssuesSchema>;
+ export type TriggerTaskWorkItem = z.infer<typeof TriggerTaskSchema>;
+diff --git a/packages/worker/src/entrypoint.ts b/packages/worker/src/entrypoint.ts
+index 6958f5b..236b344 100644
+--- a/packages/worker/src/entrypoint.ts
++++ b/packages/worker/src/entrypoint.ts
+@@ -10,6 +10,7 @@ import {
+ import { ArchitectWorker } from './workers/architect-worker.js';
+ import { BaseWorker, type WorkerContext } from './workers/base-worker.js';
+ import { DeveloperWorker } from './workers/developer-worker.js';
++import { DocumenterWorker } from './workers/documenter-worker.js';
+ import { PlannerWorker } from './workers/planner-worker.js';
+ import { RebaserWorker } from './workers/rebaser-worker.js';
+ import { ReviewerWorker } from './workers/reviewer-worker.js';
+@@ -22,6 +23,7 @@ export const TASK_TYPES = [
+   'reviewer',
+   'reviser',
+   'rebaser',
++  'documenter',
+ ] as const;
+ 
+ export type TaskType = (typeof TASK_TYPES)[number];
+@@ -40,6 +42,8 @@ export function createWorker(taskType: string): BaseWorker {
+       return new ReviserWorker();
+     case 'rebaser':
+       return new RebaserWorker();
++    case 'documenter':
++      return new DocumenterWorker();
+     default:
+       throw new PermanentError(`Unknown TASK_TYPE: ${taskType}`);
+   }

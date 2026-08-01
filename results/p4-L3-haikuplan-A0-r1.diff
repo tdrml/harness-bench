@@ -1,0 +1,328 @@
+diff --git a/packages/core/src/dynamodb/task-graphs.ts b/packages/core/src/dynamodb/task-graphs.ts
+index 5490532..c52b125 100644
+--- a/packages/core/src/dynamodb/task-graphs.ts
++++ b/packages/core/src/dynamodb/task-graphs.ts
+@@ -2,6 +2,7 @@ import {
+   BatchWriteCommand,
+   GetCommand,
+   QueryCommand,
++  ScanCommand,
+   UpdateCommand,
+   type DynamoDBDocumentClient,
+ } from '@aws-sdk/lib-dynamodb';
+@@ -112,4 +113,58 @@ export class TaskGraphsService {
+       (t) => t.status === 'PENDING' && t.dependsOn.every((dep) => completedIds.has(dep)),
+     );
+   }
++
++  async findTaskByRepoAndPrNumber(
++    repoFullName: string,
++    prNumber: number,
++  ): Promise<{ projectId: string; task: Task } | undefined> {
++    const parts = repoFullName.split('/');
++    if (parts.length !== 2 || !parts[0] || !parts[1]) {
++      return undefined;
++    }
++    const [repoOwner, repoName] = parts;
++
++    const projectsTableName = getConfig().DYNAMODB_TABLE_PROJECTS;
++    let lastEvaluatedKey: Record<string, unknown> | undefined;
++    const matchingProjects: string[] = [];
++
++    do {
++      const result = await this.client.send(
++        new ScanCommand({
++          TableName: projectsTableName,
++          FilterExpression: '#repoOwner = :repoOwner AND #repoName = :repoName',
++          ExpressionAttributeNames: {
++            '#repoOwner': 'repoOwner',
++            '#repoName': 'repoName',
++          },
++          ExpressionAttributeValues: {
++            ':repoOwner': repoOwner,
++            ':repoName': repoName,
++          },
++          ExclusiveStartKey: lastEvaluatedKey,
++        }),
++      );
++
++      if (result.Items) {
++        for (const item of result.Items) {
++          const projectId = (item as Record<string, unknown>)['projectId'];
++          if (typeof projectId === 'string') {
++            matchingProjects.push(projectId);
++          }
++        }
++      }
++
++      lastEvaluatedKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
++    } while (lastEvaluatedKey);
++
++    for (const projectId of matchingProjects) {
++      const tasks = await this.getGraph(projectId);
++      const matchingTask = tasks.find((t) => t.prNumber === prNumber);
++      if (matchingTask) {
++        return { projectId, task: matchingTask };
++      }
++    }
++
++    return undefined;
++  }
+ }
+diff --git a/packages/lambdas/__tests__/webhook-handler.test.ts b/packages/lambdas/__tests__/webhook-handler.test.ts
+index 33979c6..da2b6f8 100644
+--- a/packages/lambdas/__tests__/webhook-handler.test.ts
++++ b/packages/lambdas/__tests__/webhook-handler.test.ts
+@@ -47,6 +47,28 @@ vi.mock('uuid', () => ({
+   v4: vi.fn().mockReturnValue('test-uuid'),
+ }));
+ 
++const mockFindTaskByRepoAndPrNumber = vi.fn();
++
++vi.mock('@aws-sdk/client-dynamodb', () => ({
++  DynamoDBClient: vi.fn(() => ({})),
++}));
++
++vi.mock('@aws-sdk/lib-dynamodb', () => ({
++  DynamoDBDocumentClient: {
++    from: vi.fn(() => ({})),
++  },
++}));
++
++vi.mock('@telos/core', async () => {
++  const actual = await vi.importActual('@telos/core');
++  return {
++    ...actual,
++    TaskGraphsService: vi.fn().mockImplementation(() => ({
++      findTaskByRepoAndPrNumber: mockFindTaskByRepoAndPrNumber,
++    })),
++  };
++});
++
+ // Import after mocks are set up.
+ // Note: the module caches the webhook secret at module level, so SSM is only
+ // called on the very first handler invocation across all tests in this file.
+@@ -222,9 +244,10 @@ describe('webhook-handler', () => {
+       expect(JSON.parse((result as { body: string }).body)).toEqual({ ignored: true });
+     });
+ 
+-    it('returns 200 { ignored: true } for pull_request events', async () => {
++    it('returns 200 { status: ignored } for pull_request events with non-review_requested action', async () => {
+       const body = JSON.stringify({
+         action: 'opened',
++        pull_request: { number: 5 },
+         repository: {
+           full_name: 'org/repo',
+           name: 'repo',
+@@ -234,7 +257,7 @@ describe('webhook-handler', () => {
+       const event = makeWebhookEvent({ githubEvent: 'pull_request', body });
+       const result = await handler(event);
+       expect(result).toMatchObject({ statusCode: 200 });
+-      expect(JSON.parse((result as { body: string }).body)).toEqual({ ignored: true });
++      expect(JSON.parse((result as { body: string }).body)).toEqual({ status: 'ignored' });
+     });
+ 
+     it('returns 200 { ignored: true } for issues event with non-kickoff label', async () => {
+@@ -511,6 +534,89 @@ describe('webhook-handler', () => {
+     });
+   });
+ 
++  // -------------------------------------------------------------------------
++  // pull_request review_requested → REVIEW_PR
++  // -------------------------------------------------------------------------
++  describe('pull_request review_requested → REVIEW_PR', () => {
++    it('returns 200 { status: ignored } for wrong action', async () => {
++      const body = JSON.stringify({
++        action: 'opened',
++        pull_request: { number: 10 },
++        repository: {
++          full_name: 'acme/myapp',
++          name: 'myapp',
++          owner: { login: 'acme' },
++        },
++      });
++      const event = makeWebhookEvent({ githubEvent: 'pull_request', body });
++      const result = await handler(event);
++
++      expect(result).toMatchObject({ statusCode: 200 });
++      const parsed = JSON.parse((result as { body: string }).body);
++      expect(parsed).toEqual({ status: 'ignored' });
++      expect(mockSqsSend).not.toHaveBeenCalled();
++    });
++
++    it('returns 200 { status: ignored, reason: unknown pr } when task not found', async () => {
++      mockFindTaskByRepoAndPrNumber.mockResolvedValueOnce(undefined);
++
++      const body = JSON.stringify({
++        action: 'review_requested',
++        pull_request: { number: 99 },
++        repository: {
++          full_name: 'acme/myapp',
++          name: 'myapp',
++          owner: { login: 'acme' },
++        },
++      });
++      const event = makeWebhookEvent({ githubEvent: 'pull_request', body });
++      const result = await handler(event);
++
++      expect(result).toMatchObject({ statusCode: 200 });
++      const parsed = JSON.parse((result as { body: string }).body);
++      expect(parsed).toEqual({ status: 'ignored', reason: 'unknown pr' });
++      expect(mockFindTaskByRepoAndPrNumber).toHaveBeenCalledWith('acme/myapp', 99);
++      expect(mockSqsSend).not.toHaveBeenCalled();
++    });
++
++    it('enqueues REVIEW_PR work item for matching task and returns 202', async () => {
++      mockFindTaskByRepoAndPrNumber.mockResolvedValueOnce({
++        projectId: 'test-project-id',
++        task: { taskId: 'task-abc', prNumber: 42, status: 'PENDING', dependsOn: [] },
++      });
++
++      const body = JSON.stringify({
++        action: 'review_requested',
++        pull_request: { number: 42 },
++        repository: {
++          full_name: 'acme/myapp',
++          name: 'myapp',
++          owner: { login: 'acme' },
++        },
++      });
++      const event = makeWebhookEvent({ githubEvent: 'pull_request', body });
++      const result = await handler(event);
++
++      expect(result).toMatchObject({ statusCode: 202 });
++      const parsed = JSON.parse((result as { body: string }).body);
++      expect(parsed).toEqual({ status: 'queued' });
++
++      expect(mockSqsSend).toHaveBeenCalledOnce();
++      const cmd = mockSqsSend.mock.calls[0][0] as {
++        input: { Entries: Array<{ MessageBody: string }> };
++      };
++      expect(cmd.input.Entries).toHaveLength(1);
++
++      const workItem = JSON.parse(cmd.input.Entries[0].MessageBody);
++      expect(workItem.type).toBe('REVIEW_PR');
++      expect(workItem.projectId).toBe('test-project-id');
++      expect(workItem.taskId).toBe('task-abc');
++      expect(workItem.prNumber).toBe(42);
++      expect(workItem.repoFullName).toBe('acme/myapp');
++      expect(workItem.correlationId).toBe('test-uuid');
++    });
++  });
++
+   // -------------------------------------------------------------------------
+   // Malformed payloads
+   // -------------------------------------------------------------------------
+diff --git a/packages/lambdas/package.json b/packages/lambdas/package.json
+index 31bcf5c..a0402dc 100644
+--- a/packages/lambdas/package.json
++++ b/packages/lambdas/package.json
+@@ -11,9 +11,11 @@
+     "dev": "tsc --watch"
+   },
+   "dependencies": {
++    "@aws-sdk/client-dynamodb": "^3",
+     "@aws-sdk/client-ecs": "^3",
+     "@aws-sdk/client-ssm": "^3",
+     "@aws-sdk/client-sqs": "^3",
++    "@aws-sdk/lib-dynamodb": "^3",
+     "@telos/core": "workspace:*",
+     "uuid": "^10"
+   },
+diff --git a/packages/lambdas/src/handlers/webhook-handler.ts b/packages/lambdas/src/handlers/webhook-handler.ts
+index 74b5e1a..39ed228 100644
+--- a/packages/lambdas/src/handlers/webhook-handler.ts
++++ b/packages/lambdas/src/handlers/webhook-handler.ts
+@@ -1,13 +1,17 @@
+ import { createHmac, timingSafeEqual } from 'node:crypto';
+ import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
++import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
++import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+ import { v4 as uuidv4 } from 'uuid';
+-import { enqueueWorkItems, getConfig } from '@telos/core';
++import { TaskGraphsService, enqueueWorkItems, getConfig } from '@telos/core';
+ 
+ // Module-level clients and cache — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const dynamoDBClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
++const taskGraphsService = new TaskGraphsService(dynamoDBClient);
+ let cachedWebhookSecret: string | undefined;
+ 
+ async function getWebhookSecret(): Promise<string> {
+@@ -225,5 +229,49 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
+     return respond(200, { ignored: true });
+   }
+ 
++  if (githubEvent === 'pull_request') {
++    const action = p['action'];
++
++    if (action !== 'review_requested') {
++      return respond(200, { status: 'ignored' });
++    }
++
++    const prRaw = p['pull_request'];
++    if (prRaw === null || typeof prRaw !== 'object' || Array.isArray(prRaw)) {
++      return respond(400, { error: 'Missing pull_request field' });
++    }
++
++    const pr = prRaw as Record<string, unknown>;
++    const prNumber = pr['number'];
++
++    if (typeof prNumber !== 'number') {
++      return respond(400, { error: 'Missing pull_request.number' });
++    }
++
++    const taskMatch = await taskGraphsService.findTaskByRepoAndPrNumber(repoFullName, prNumber);
++
++    if (!taskMatch) {
++      return respond(200, { status: 'ignored', reason: 'unknown pr' });
++    }
++
++    const correlationId = uuidv4();
++
++    await enqueueWorkItems(
++      [
++        {
++          type: 'REVIEW_PR',
++          projectId: taskMatch.projectId,
++          repoFullName,
++          correlationId,
++          taskId: taskMatch.task.taskId,
++          prNumber,
++        },
++      ],
++      sqsClient,
++    );
++
++    return respond(202, { status: 'queued' });
++  }
++
+   return respond(200, { ignored: true });
+ };
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 565c955..97c13a9 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -76,6 +76,9 @@ importers:
+ 
+   packages/lambdas:
+     dependencies:
++      '@aws-sdk/client-dynamodb':
++        specifier: ^3
++        version: 3.999.0
+       '@aws-sdk/client-ecs':
+         specifier: ^3
+         version: 3.999.0
+@@ -85,6 +88,9 @@ importers:
+       '@aws-sdk/client-ssm':
+         specifier: ^3
+         version: 3.999.0
++      '@aws-sdk/lib-dynamodb':
++        specifier: ^3
++        version: 3.999.0(@aws-sdk/client-dynamodb@3.999.0)
+       '@telos/core':
+         specifier: workspace:*
+         version: link:../core

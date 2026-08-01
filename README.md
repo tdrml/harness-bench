@@ -16,6 +16,8 @@ So I tried to measure the same layers under controlled conditions: same model, s
 
 The interesting conclusion is the tension between those two facts: **harness ROI is a function of horizon, not a constant.** Below some task-length/autonomy threshold, frontier models don't need the scaffolding. Production fleets operate far above that threshold, where the same scaffolding blocks failures continuously. Benchmarks that grade harnesses on short tasks are measuring the flat part of the curve.
 
+**Pilot 4 then split the harness's value in two.** Giving the same failing executor a written implementation plan — authored by *any* tier, including haiku planning for itself — fixed the spec-misreading failures completely (planned haiku: 17/18 bare vs 1/3 unplanned), but the one failure that survived was the follow-through relapse, and only the enforcement loop closed it reliably. **Plan for the *what*, harness for the *whether*.**
+
 **Pilot 3 found the onset.** At hour-scale, cross-cutting feature builds (a new worker mode wired through five layers; a 17-file refactor; a webhook flow), the top-tier model still didn't need the harness — but the small model did, decisively: **haiku went 1/3 bare and 3/3 with the full harness**, matching sonnet's outcomes at roughly a third of the cost (n=1 per cell; § Pilot 3). The harness acted as a model-tier equalizer exactly where horizon got long.
 
 Three harness failure modes surfaced along the way that I haven't seen documented (§ Findings 2–3, 7), including the adversarial reviewer discovering a real, unplanted prototype-chain bug in the target codebase — and a grading meta-result: **half of the failures my own instrument recorded were the instrument's fault** (§ Finding 6).
@@ -104,6 +106,27 @@ Three cross-cutting feature builds against the same pinned repo, each spanning m
 
 **7. The detection–transport gap.** In L3:haiku:FULL, the adversarial reviewer *caught real spec deviations* and returned `REQUEST_CHANGES` — formatted as markdown prose instead of the required JSON. The runner's parser dropped it, no revision ran, and the pipeline proceeded exactly as if the review had approved. Detection succeeded; the verdict transport failed. This is Finding 2's sharper sibling, and it indicts my own runner: the primary agent's output got a schema-salvage retry, the reviewer's verdict did not. **Every inter-agent handoff needs the same contract enforcement as the final output — a harness is only as strong as its least-enforced edge.** (This exact pattern — schema-force *everything*, with salvage retries — is what my production platform converged on after equivalent incidents.)
 
+---
+
+## Pilot 4 — the planning-tier ablation
+
+Hypothesis under test (raised after pilot 3): *frontier models are only needed to architect/plan/write the issue; given a spec-precision plan, a cheap executor matches frontier execution.* Design: executor = haiku everywhere; a real "tech lead" planner invocation (reads the repo, writes spec-critical details → ordered steps → consistency sweep → acceptance checklist, no code) cached per task × planner tier; tasks L1–L3; n=2. Pre-registered before runs, including the mid-pilot opus extension (journaled before any opus cell ran). Runner debts from pilot 3 paid first: reviewer verdicts now get the same schema-salvage as primary output (Finding 7), and the scorer builds before grading (Finding 6b).
+
+| haiku executor | A0 | FULL |
+|---|---|---|
+| no plan (pilot 3, n=1) | 1/3 | 3/3 |
+| haiku-plan ($0.15–0.22/plan) | 6/6 | — |
+| sonnet-plan ($0.98–1.52/plan) | 5/6 | 6/6 |
+| opus-plan ($1.49–1.85/plan) | 6/6 | — |
+
+24 runs, $30.18 including all planner invocations. The sole failure: `L2:sonnet-plan:A0` rep 2 — the same mid-migration walk-away as unplanned haiku, *with the consistency sweep spelled out in its instructions*.
+
+**8. Specification and enforcement fix different failure classes.** Planning cured the spec-fidelity failure completely: on the 200-vs-202 task, planned haiku went 6/6 bare across all three planner tiers. It could not reliably cure the follow-through failure: the L2 relapse recurred under a sonnet plan, and in the plan+FULL cells the reviewer issued REQUEST_CHANGES → revision in **both** reps — the enforcement loop doing exactly the work specification couldn't. Reviewer engagement tracked the failure class perfectly (APPROVE on L1/L3, REQUEST_CHANGES on L2, both reps).
+
+**9. Planner tier barely mattered — including the model planning for itself.** haiku-plan 6/6, opus-plan 6/6, sonnet-plan 5/6: decomposition itself is the medicine, not the prestige of the decomposer (opus's 2/2 on the relapse task vs sonnet's 1/2 is a planner-tier hint, not a powered result). The sharpest datum: **haiku-as-planner wrote the spec-critical "202" into its plan four times — the same model that drops it while executing unplanned.** Reading-to-plan and writing-to-implement appear to be different cognitive regimes within one model; separating them is nearly free ($0.15–0.22/plan).
+
+**10. The cheapest reliable stack observed has no frontier model in it:** haiku-plan → haiku executor → deterministic gates + reviewer. ~$0.85/task all-in at hour scale, matching sonnet's outcomes on this task set.
+
 *Pilot 3 incident note:* the first L1:sonnet:FULL attempt exhausted the 16 GB host VM (12-worker vitest pool × CDK synth under a concurrent headless agent; no OOM-kill, full thrash). Reruns were memory-capped (worker pools + cgroup MemoryMax). The benchmark's own infrastructure OOM'ing the host is, fittingly, an operational-reality datum.
 
 ---
@@ -136,6 +159,7 @@ mkdir .claude-bench-config && cp ~/.claude/.credentials.json .claude-bench-confi
 node runner/run-pilot.mjs    # pilot 1 (15 runs, ~$4)
 node runner/run-pilot2.mjs   # pilot 2 (40 runs, ~$12)
 node runner/run-pilot3.mjs   # pilot 3 (12 hour-scale runs, ~$24)
+node runner/run-pilot4.mjs   # pilot 4 (24 planning-ablation runs, ~$30)
 ```
 
 Runners are sequential, resumable (JSONL journal is the source of truth), and kill-switched on summed API-equivalent cost.

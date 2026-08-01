@@ -1,0 +1,305 @@
+diff --git a/packages/core/__tests__/dynamodb.test.ts b/packages/core/__tests__/dynamodb.test.ts
+index 3699ca6..541aa65 100644
+--- a/packages/core/__tests__/dynamodb.test.ts
++++ b/packages/core/__tests__/dynamodb.test.ts
+@@ -271,6 +271,39 @@ describe('TaskGraphsService', () => {
+     expect(cmd.input.ExpressionAttributeValues[':prNumber']).toBe(42);
+   });
+ 
++  it('findTaskByPrNumber scan resolves with a matching item → returns that task', async () => {
++    const task = makeTask({ taskId: 'task-1', prNumber: 123 });
++    const client = makeClient(() => ({ Items: [task] }));
++    const svc = new TaskGraphsService(client);
++    const result = await svc.findTaskByPrNumber(123);
++    expect(result).toEqual(task);
++    const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
++    expect(cmd.input.FilterExpression).toBe('prNumber = :prNumber');
++    expect(cmd.input.ExpressionAttributeValues[':prNumber']).toBe(123);
++  });
++
++  it('findTaskByPrNumber scan resolves with no items → returns undefined', async () => {
++    const client = makeClient(() => ({}));
++    const svc = new TaskGraphsService(client);
++    const result = await svc.findTaskByPrNumber(999);
++    expect(result).toBeUndefined();
++  });
++
++  it('findTaskByPrNumber pagination — first page empty, second page has the match', async () => {
++    const task = makeTask({ taskId: 'task-1', prNumber: 456 });
++    const lastKey = { projectId: 'proj-1', taskId: 'other-task' };
++    const sendFn = vi.fn()
++      .mockResolvedValueOnce({ Items: [], LastEvaluatedKey: lastKey })
++      .mockResolvedValueOnce({ Items: [task] });
++    const client = { send: sendFn } as unknown as import('@aws-sdk/lib-dynamodb').DynamoDBDocumentClient;
++    const svc = new TaskGraphsService(client);
++    const result = await svc.findTaskByPrNumber(456);
++    expect(result).toEqual(task);
++    expect(sendFn).toHaveBeenCalledTimes(2);
++    const secondCall = sendFn.mock.calls[1][0];
++    expect(secondCall.input.ExclusiveStartKey).toEqual(lastKey);
++  });
++
+   it('getReadyTasks returns PENDING tasks whose deps are all COMPLETED', async () => {
+     const tasks: Task[] = [
+       makeTask({ taskId: 'A', status: 'COMPLETED', dependsOn: [] }),
+diff --git a/packages/core/src/dynamodb/task-graphs.ts b/packages/core/src/dynamodb/task-graphs.ts
+index 5490532..e7f5123 100644
+--- a/packages/core/src/dynamodb/task-graphs.ts
++++ b/packages/core/src/dynamodb/task-graphs.ts
+@@ -1,9 +1,10 @@
+ import {
+   BatchWriteCommand,
++  type DynamoDBDocumentClient,
+   GetCommand,
+   QueryCommand,
++  ScanCommand,
+   UpdateCommand,
+-  type DynamoDBDocumentClient,
+ } from '@aws-sdk/lib-dynamodb';
+ import { getConfig } from '../config/index.js';
+ import type { Task } from './types.js';
+@@ -78,6 +79,28 @@ export class TaskGraphsService {
+     return result.Item as Task | undefined;
+   }
+ 
++  async findTaskByPrNumber(prNumber: number): Promise<Task | undefined> {
++    let lastEvaluatedKey: Record<string, unknown> | undefined;
++
++    do {
++      const result = await this.client.send(
++        new ScanCommand({
++          TableName: this.tableName,
++          FilterExpression: 'prNumber = :prNumber',
++          ExpressionAttributeValues: { ':prNumber': prNumber },
++          ExclusiveStartKey: lastEvaluatedKey,
++        }),
++      );
++      const items = (result.Items ?? []) as Task[];
++      if (items.length > 0) {
++        return items[0];
++      }
++      lastEvaluatedKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
++    } while (lastEvaluatedKey);
++
++    return undefined;
++  }
++
+   async updateTaskStatus(
+     projectId: string,
+     taskId: string,
+diff --git a/packages/lambdas/__tests__/webhook-handler.test.ts b/packages/lambdas/__tests__/webhook-handler.test.ts
+index 33979c6..cad13ca 100644
+--- a/packages/lambdas/__tests__/webhook-handler.test.ts
++++ b/packages/lambdas/__tests__/webhook-handler.test.ts
+@@ -47,6 +47,17 @@ vi.mock('uuid', () => ({
+   v4: vi.fn().mockReturnValue('test-uuid'),
+ }));
+ 
++const mockFindTaskByPrNumber = vi.fn();
++
++vi.mock('@telos/core', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('@telos/core')>();
++  return {
++    ...actual,
++    createDynamoDBClient: vi.fn(() => ({})),
++    TaskGraphsService: vi.fn(() => ({ findTaskByPrNumber: mockFindTaskByPrNumber })),
++  };
++});
++
+ // Import after mocks are set up.
+ // Note: the module caches the webhook secret at module level, so SSM is only
+ // called on the very first handler invocation across all tests in this file.
+@@ -107,6 +118,7 @@ describe('webhook-handler', () => {
+       Successful: [{ Id: '0', MessageId: 'msg-1', MD5OfMessageBody: 'abc' }],
+       Failed: [],
+     });
++    mockFindTaskByPrNumber.mockReset();
+   });
+ 
+   // -------------------------------------------------------------------------
+@@ -222,9 +234,10 @@ describe('webhook-handler', () => {
+       expect(JSON.parse((result as { body: string }).body)).toEqual({ ignored: true });
+     });
+ 
+-    it('returns 200 { ignored: true } for pull_request events', async () => {
++    it('returns 200 { status: "ignored" } for pull_request events with non-review_requested action', async () => {
+       const body = JSON.stringify({
+         action: 'opened',
++        pull_request: { number: 1 },
+         repository: {
+           full_name: 'org/repo',
+           name: 'repo',
+@@ -234,7 +247,7 @@ describe('webhook-handler', () => {
+       const event = makeWebhookEvent({ githubEvent: 'pull_request', body });
+       const result = await handler(event);
+       expect(result).toMatchObject({ statusCode: 200 });
+-      expect(JSON.parse((result as { body: string }).body)).toEqual({ ignored: true });
++      expect(JSON.parse((result as { body: string }).body)).toEqual({ status: 'ignored' });
+     });
+ 
+     it('returns 200 { ignored: true } for issues event with non-kickoff label', async () => {
+@@ -511,6 +524,94 @@ describe('webhook-handler', () => {
+     });
+   });
+ 
++  // -------------------------------------------------------------------------
++  // pull_request review_requested → REVIEW_PR
++  // -------------------------------------------------------------------------
++  describe('pull_request review_requested → REVIEW_PR', () => {
++    it('wrong action ignored', async () => {
++      const body = JSON.stringify({
++        action: 'synchronize',
++        pull_request: { number: 42 },
++        repository: {
++          full_name: 'acme/myapp',
++          name: 'myapp',
++          owner: { login: 'acme' },
++        },
++      });
++      const event = makeWebhookEvent({ githubEvent: 'pull_request', body });
++      const result = await handler(event);
++
++      expect(result).toMatchObject({ statusCode: 200 });
++      expect(JSON.parse((result as { body: string }).body)).toEqual({ status: 'ignored' });
++      expect(mockFindTaskByPrNumber).not.toHaveBeenCalled();
++      expect(mockSqsSend).not.toHaveBeenCalled();
++    });
++
++    it('unknown PR ignored', async () => {
++      const body = JSON.stringify({
++        action: 'review_requested',
++        pull_request: { number: 99 },
++        repository: {
++          full_name: 'acme/myapp',
++          name: 'myapp',
++          owner: { login: 'acme' },
++        },
++      });
++      const event = makeWebhookEvent({ githubEvent: 'pull_request', body });
++      mockFindTaskByPrNumber.mockResolvedValueOnce(undefined);
++      const result = await handler(event);
++
++      expect(result).toMatchObject({ statusCode: 200 });
++      expect(JSON.parse((result as { body: string }).body)).toEqual({
++        status: 'ignored',
++        reason: 'unknown pr',
++      });
++      expect(mockFindTaskByPrNumber).toHaveBeenCalledWith(99);
++      expect(mockSqsSend).not.toHaveBeenCalled();
++    });
++
++    it('matching PR enqueues exactly one correctly-shaped REVIEW_PR item and returns 202', async () => {
++      const body = JSON.stringify({
++        action: 'review_requested',
++        pull_request: { number: 42 },
++        repository: {
++          full_name: 'acme/myapp',
++          name: 'myapp',
++          owner: { login: 'acme' },
++        },
++      });
++      const event = makeWebhookEvent({ githubEvent: 'pull_request', body });
++      mockFindTaskByPrNumber.mockResolvedValueOnce({
++        projectId: 'proj-1',
++        taskId: 'task-9',
++        prNumber: 42,
++        title: 't',
++        description: 'd',
++        status: 'REVIEW',
++        dependsOn: [],
++        riskLevel: 'Low',
++        order: 0,
++      });
++      const result = await handler(event);
++
++      expect(result).toMatchObject({ statusCode: 202 });
++      expect(JSON.parse((result as { body: string }).body)).toEqual({ status: 'queued' });
++
++      expect(mockSqsSend).toHaveBeenCalledOnce();
++      const cmd = mockSqsSend.mock.calls[0][0] as {
++        input: { Entries: Array<{ MessageBody: string }> };
++      };
++      expect(cmd.input.Entries).toHaveLength(1);
++      const workItem = JSON.parse(cmd.input.Entries[0].MessageBody);
++      expect(workItem.type).toBe('REVIEW_PR');
++      expect(workItem.projectId).toBe('proj-1');
++      expect(workItem.taskId).toBe('task-9');
++      expect(workItem.prNumber).toBe(42);
++      expect(workItem.repoFullName).toBe('acme/myapp');
++      expect(workItem.correlationId).toBe('test-uuid');
++    });
++  });
++
+   // -------------------------------------------------------------------------
+   // Malformed payloads
+   // -------------------------------------------------------------------------
+diff --git a/packages/lambdas/src/handlers/webhook-handler.ts b/packages/lambdas/src/handlers/webhook-handler.ts
+index 74b5e1a..2641583 100644
+--- a/packages/lambdas/src/handlers/webhook-handler.ts
++++ b/packages/lambdas/src/handlers/webhook-handler.ts
+@@ -3,11 +3,13 @@ import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
+ import { v4 as uuidv4 } from 'uuid';
+-import { enqueueWorkItems, getConfig } from '@telos/core';
++import { createDynamoDBClient, enqueueWorkItems, getConfig, TaskGraphsService } from '@telos/core';
+ 
+ // Module-level clients and cache — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
++const dynamoClient = createDynamoDBClient();
++const taskGraphsService = new TaskGraphsService(dynamoClient);
+ let cachedWebhookSecret: string | undefined;
+ 
+ async function getWebhookSecret(): Promise<string> {
+@@ -225,5 +227,50 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
+     return respond(200, { ignored: true });
+   }
+ 
++  if (githubEvent === 'pull_request') {
++    const action = p['action'];
++    if (action !== 'review_requested') {
++      return respond(200, { status: 'ignored' });
++    }
++
++    const pullRequestRaw = p['pull_request'];
++    if (
++      pullRequestRaw === null ||
++      typeof pullRequestRaw !== 'object' ||
++      Array.isArray(pullRequestRaw)
++    ) {
++      return respond(400, { error: 'Missing pull_request field' });
++    }
++
++    const pullRequest = pullRequestRaw as Record<string, unknown>;
++    const prNumber = pullRequest['number'];
++
++    if (typeof prNumber !== 'number') {
++      return respond(400, { error: 'Missing pull_request.number' });
++    }
++
++    const task = await taskGraphsService.findTaskByPrNumber(prNumber);
++    if (!task) {
++      return respond(200, { status: 'ignored', reason: 'unknown pr' });
++    }
++
++    const correlationId = uuidv4();
++    await enqueueWorkItems(
++      [
++        {
++          type: 'REVIEW_PR',
++          projectId: task.projectId,
++          repoFullName,
++          correlationId,
++          taskId: task.taskId,
++          prNumber,
++        },
++      ],
++      sqsClient,
++    );
++
++    return respond(202, { status: 'queued' });
++  }
++
+   return respond(200, { ignored: true });
+ };
