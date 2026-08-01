@@ -1,0 +1,1337 @@
+diff --git a/packages/core/__tests__/dynamodb.test.ts b/packages/core/__tests__/dynamodb.test.ts
+index 3699ca6..f11bf74 100644
+--- a/packages/core/__tests__/dynamodb.test.ts
++++ b/packages/core/__tests__/dynamodb.test.ts
+@@ -57,7 +57,7 @@ describe('ProjectsService', () => {
+ 
+   it('createProject calls PutCommand', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new ProjectsService(client);
++    const svc = new ProjectsService(client, 'telos-projects');
+     await svc.createProject(baseProject);
+     expect(client.send).toHaveBeenCalledOnce();
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+@@ -68,21 +68,21 @@ describe('ProjectsService', () => {
+ 
+   it('getProject returns the item', async () => {
+     const client = makeClient(() => ({ Item: baseProject }));
+-    const svc = new ProjectsService(client);
++    const svc = new ProjectsService(client, 'telos-projects');
+     const result = await svc.getProject('proj-1');
+     expect(result).toEqual(baseProject);
+   });
+ 
+   it('getProject returns undefined when not found', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new ProjectsService(client);
++    const svc = new ProjectsService(client, 'telos-projects');
+     const result = await svc.getProject('missing');
+     expect(result).toBeUndefined();
+   });
+ 
+   it('updateProjectStatus calls UpdateCommand with correct args', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new ProjectsService(client);
++    const svc = new ProjectsService(client, 'telos-projects');
+     await svc.updateProjectStatus('proj-1', 'IN_PROGRESS', '2024-01-02T00:00:00Z');
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.ExpressionAttributeValues[':status']).toBe('IN_PROGRESS');
+@@ -91,7 +91,7 @@ describe('ProjectsService', () => {
+ 
+   it('listProjectsByStatus queries the status-index', async () => {
+     const client = makeClient(() => ({ Items: [baseProject] }));
+-    const svc = new ProjectsService(client);
++    const svc = new ProjectsService(client, 'telos-projects');
+     const results = await svc.listProjectsByStatus('PENDING');
+     expect(results).toHaveLength(1);
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+@@ -101,7 +101,7 @@ describe('ProjectsService', () => {
+ 
+   it('listProjectsByStatus returns empty array when no items', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new ProjectsService(client);
++    const svc = new ProjectsService(client, 'telos-projects');
+     const results = await svc.listProjectsByStatus('COMPLETED');
+     expect(results).toEqual([]);
+   });
+@@ -113,7 +113,7 @@ describe('ProjectsService', () => {
+       .mockResolvedValueOnce({ Items: [baseProject], LastEvaluatedKey: lastKey })
+       .mockResolvedValueOnce({ Items: [proj2] });
+     const client = { send: sendFn } as unknown as import('@aws-sdk/lib-dynamodb').DynamoDBDocumentClient;
+-    const svc = new ProjectsService(client);
++    const svc = new ProjectsService(client, 'telos-projects');
+     const results = await svc.listProjectsByStatus('PENDING');
+     expect(results).toEqual([baseProject, proj2]);
+     expect(sendFn).toHaveBeenCalledTimes(2);
+@@ -123,7 +123,7 @@ describe('ProjectsService', () => {
+ 
+   it('deleteProject calls DeleteCommand', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new ProjectsService(client);
++    const svc = new ProjectsService(client, 'telos-projects');
+     await svc.deleteProject('proj-1');
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.Key).toEqual({ projectId: 'proj-1' });
+@@ -153,7 +153,7 @@ describe('TaskGraphsService', () => {
+ 
+   it('putGraph sends one BatchWriteCommand for <=25 tasks', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     const tasks = [makeTask(), makeTask({ taskId: 'task-2', order: 2 })];
+     await svc.putGraph(tasks);
+     expect(client.send).toHaveBeenCalledOnce();
+@@ -163,7 +163,7 @@ describe('TaskGraphsService', () => {
+ 
+   it('putGraph batches >25 tasks into multiple calls', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     const tasks = Array.from({ length: 30 }, (_, i) => makeTask({ taskId: `task-${i}`, order: i }));
+     await svc.putGraph(tasks);
+     expect(client.send).toHaveBeenCalledTimes(2);
+@@ -180,7 +180,7 @@ describe('TaskGraphsService', () => {
+         })
+         .mockResolvedValueOnce({});
+       const client = { send: sendFn } as unknown as import('@aws-sdk/lib-dynamodb').DynamoDBDocumentClient;
+-      const svc = new TaskGraphsService(client);
++      const svc = new TaskGraphsService(client, 'telos-task-graphs');
+       const promise = svc.putGraph([task1, task2]);
+       await vi.runAllTimersAsync();
+       await promise;
+@@ -198,7 +198,7 @@ describe('TaskGraphsService', () => {
+         UnprocessedItems: { 'telos-task-graphs': [{ PutRequest: { Item: task } }] },
+       });
+       const client = { send: sendFn } as unknown as import('@aws-sdk/lib-dynamodb').DynamoDBDocumentClient;
+-      const svc = new TaskGraphsService(client);
++      const svc = new TaskGraphsService(client, 'telos-task-graphs');
+       // Attach rejection handler immediately to avoid unhandled rejection warning
+       const settled = svc.putGraph([task]).then(
+         () => ({ ok: true as const }),
+@@ -217,7 +217,7 @@ describe('TaskGraphsService', () => {
+   it('getGraph queries by projectId', async () => {
+     const task = makeTask();
+     const client = makeClient(() => ({ Items: [task] }));
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     const result = await svc.getGraph('proj-1');
+     expect(result).toEqual([task]);
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+@@ -232,7 +232,7 @@ describe('TaskGraphsService', () => {
+       .mockResolvedValueOnce({ Items: [task1], LastEvaluatedKey: lastKey })
+       .mockResolvedValueOnce({ Items: [task2] });
+     const client = { send: sendFn } as unknown as import('@aws-sdk/lib-dynamodb').DynamoDBDocumentClient;
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     const result = await svc.getGraph('proj-1');
+     expect(result).toEqual([task1, task2]);
+     expect(sendFn).toHaveBeenCalledTimes(2);
+@@ -243,21 +243,21 @@ describe('TaskGraphsService', () => {
+   it('getTask returns a single task', async () => {
+     const task = makeTask();
+     const client = makeClient(() => ({ Item: task }));
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     const result = await svc.getTask('proj-1', 'task-1');
+     expect(result).toEqual(task);
+   });
+ 
+   it('getTask returns undefined for missing task', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     const result = await svc.getTask('proj-1', 'missing');
+     expect(result).toBeUndefined();
+   });
+ 
+   it('updateTaskStatus sends UpdateCommand', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     await svc.updateTaskStatus('proj-1', 'task-1', 'IN_PROGRESS');
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.ExpressionAttributeValues[':status']).toBe('IN_PROGRESS');
+@@ -265,7 +265,7 @@ describe('TaskGraphsService', () => {
+ 
+   it('updateTaskStatus includes extra fields when provided', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     await svc.updateTaskStatus('proj-1', 'task-1', 'COMPLETED', { prNumber: 42 });
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.ExpressionAttributeValues[':prNumber']).toBe(42);
+@@ -278,7 +278,7 @@ describe('TaskGraphsService', () => {
+       makeTask({ taskId: 'C', status: 'PENDING', dependsOn: ['B'] }),
+     ];
+     const client = makeClient(() => ({ Items: tasks }));
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     const ready = await svc.getReadyTasks('proj-1');
+     expect(ready.map((t) => t.taskId)).toEqual(['B']);
+   });
+@@ -289,7 +289,7 @@ describe('TaskGraphsService', () => {
+       makeTask({ taskId: 'B', status: 'IN_PROGRESS', dependsOn: [] }),
+     ];
+     const client = makeClient(() => ({ Items: tasks }));
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     const ready = await svc.getReadyTasks('proj-1');
+     expect(ready.map((t) => t.taskId)).toEqual(['A']);
+   });
+@@ -300,7 +300,7 @@ describe('TaskGraphsService', () => {
+       makeTask({ taskId: 'B', status: 'PENDING', dependsOn: ['A'] }),
+     ];
+     const client = makeClient(() => ({ Items: tasks }));
+-    const svc = new TaskGraphsService(client);
++    const svc = new TaskGraphsService(client, 'telos-task-graphs');
+     const ready = await svc.getReadyTasks('proj-1');
+     expect(ready).toHaveLength(0);
+   });
+@@ -326,7 +326,7 @@ describe('RunsService', () => {
+ 
+   it('createRun calls PutCommand with condition', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new RunsService(client);
++    const svc = new RunsService(client, 'telos-runs');
+     await svc.createRun(baseRun);
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.Item).toEqual(baseRun);
+@@ -335,21 +335,21 @@ describe('RunsService', () => {
+ 
+   it('getRun returns the item', async () => {
+     const client = makeClient(() => ({ Item: baseRun }));
+-    const svc = new RunsService(client);
++    const svc = new RunsService(client, 'telos-runs');
+     const result = await svc.getRun('run-1');
+     expect(result).toEqual(baseRun);
+   });
+ 
+   it('getRun returns undefined when not found', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new RunsService(client);
++    const svc = new RunsService(client, 'telos-runs');
+     const result = await svc.getRun('missing');
+     expect(result).toBeUndefined();
+   });
+ 
+   it('updateRunStatus with no extra fields', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new RunsService(client);
++    const svc = new RunsService(client, 'telos-runs');
+     await svc.updateRunStatus('run-1', 'RUNNING');
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.ExpressionAttributeValues[':status']).toBe('RUNNING');
+@@ -357,7 +357,7 @@ describe('RunsService', () => {
+ 
+   it('updateRunStatus includes extra fields', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new RunsService(client);
++    const svc = new RunsService(client, 'telos-runs');
+     await svc.updateRunStatus('run-1', 'COMPLETED', {
+       completedAt: '2024-01-01T01:00:00Z',
+       prNumber: 7,
+@@ -369,7 +369,7 @@ describe('RunsService', () => {
+ 
+   it('queryRunsByProjectAndTask queries the GSI', async () => {
+     const client = makeClient(() => ({ Items: [baseRun] }));
+-    const svc = new RunsService(client);
++    const svc = new RunsService(client, 'telos-runs');
+     const results = await svc.queryRunsByProjectAndTask('proj-1', 'task-1');
+     expect(results).toEqual([baseRun]);
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+@@ -378,7 +378,7 @@ describe('RunsService', () => {
+ 
+   it('queryRunsByProjectAndTask returns empty on no results', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new RunsService(client);
++    const svc = new RunsService(client, 'telos-runs');
+     const results = await svc.queryRunsByProjectAndTask('proj-1', 'task-x');
+     expect(results).toEqual([]);
+   });
+@@ -396,7 +396,7 @@ describe('TaskOutputsService', () => {
+   it('writeInput calls PutCommand with a 24h TTL', async () => {
+     const before = Math.floor(Date.now() / 1000);
+     const client = makeClient(() => ({}));
+-    const svc = new TaskOutputsService(client);
++    const svc = new TaskOutputsService(client, 'telos-task-outputs');
+     await svc.writeInput('run-1', { key: 'val' });
+     const after = Math.floor(Date.now() / 1000);
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+@@ -408,14 +408,14 @@ describe('TaskOutputsService', () => {
+ 
+   it('readInput returns the input field', async () => {
+     const client = makeClient(() => ({ Item: { runId: 'run-1', input: { foo: 'bar' }, ttl: 0 } }));
+-    const svc = new TaskOutputsService(client);
++    const svc = new TaskOutputsService(client, 'telos-task-outputs');
+     const result = await svc.readInput('run-1');
+     expect(result).toEqual({ foo: 'bar' });
+   });
+ 
+   it('readInput returns undefined when no item', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new TaskOutputsService(client);
++    const svc = new TaskOutputsService(client, 'telos-task-outputs');
+     const result = await svc.readInput('missing');
+     expect(result).toBeUndefined();
+   });
+@@ -423,7 +423,7 @@ describe('TaskOutputsService', () => {
+   it('writeOutput calls UpdateCommand with a 24h TTL', async () => {
+     const before = Math.floor(Date.now() / 1000);
+     const client = makeClient(() => ({}));
+-    const svc = new TaskOutputsService(client);
++    const svc = new TaskOutputsService(client, 'telos-task-outputs');
+     await svc.writeOutput('run-1', { result: 'done' });
+     const after = Math.floor(Date.now() / 1000);
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+@@ -437,14 +437,14 @@ describe('TaskOutputsService', () => {
+     const client = makeClient(() => ({
+       Item: { runId: 'run-1', output: { result: 'ok' }, ttl: 0 },
+     }));
+-    const svc = new TaskOutputsService(client);
++    const svc = new TaskOutputsService(client, 'telos-task-outputs');
+     const result = await svc.readOutput('run-1');
+     expect(result).toEqual({ result: 'ok' });
+   });
+ 
+   it('readOutput returns undefined when output not set', async () => {
+     const client = makeClient(() => ({ Item: { runId: 'run-1', ttl: 0 } }));
+-    const svc = new TaskOutputsService(client);
++    const svc = new TaskOutputsService(client, 'telos-task-outputs');
+     const result = await svc.readOutput('run-1');
+     expect(result).toBeUndefined();
+   });
+@@ -461,7 +461,7 @@ describe('RepoLocksService', () => {
+ 
+   it('acquireLock calls PutCommand with conditional expression', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     await svc.acquireLock('acme/app', 'owner-1');
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.Item.repoFullName).toBe('acme/app');
+@@ -475,7 +475,7 @@ describe('RepoLocksService', () => {
+   it('acquireLock sets TTL using REPO_LOCK_TTL_SECONDS from config', async () => {
+     const before = Math.floor(Date.now() / 1000);
+     const client = makeClient(() => ({}));
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     await svc.acquireLock('acme/app', 'owner-1');
+     const after = Math.floor(Date.now() / 1000);
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+@@ -489,19 +489,19 @@ describe('RepoLocksService', () => {
+       $metadata: {},
+     });
+     const client = makeClient(() => { throw condErr; });
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     await expect(svc.acquireLock('acme/app', 'owner-1')).rejects.toBeInstanceOf(LockConflictError);
+   });
+ 
+   it('acquireLock re-throws non-conditional errors', async () => {
+     const client = makeClient(() => { throw new Error('network error'); });
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     await expect(svc.acquireLock('acme/app', 'owner-1')).rejects.toThrow('network error');
+   });
+ 
+   it('releaseLock calls DeleteCommand with lockOwner condition', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     await svc.releaseLock('acme/app', 'owner-1');
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.Key).toEqual({ repoFullName: 'acme/app' });
+@@ -515,21 +515,21 @@ describe('RepoLocksService', () => {
+       $metadata: {},
+     });
+     const client = makeClient(() => { throw condErr; });
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     await expect(svc.releaseLock('acme/app', 'wrong-owner')).rejects.toBeInstanceOf(LockConflictError);
+   });
+ 
+   it('getLock returns the lock item', async () => {
+     const lock = { repoFullName: 'acme/app', lockOwner: 'o', ttl: 9999999999, acquiredAt: 'x' };
+     const client = makeClient(() => ({ Item: lock }));
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     const result = await svc.getLock('acme/app');
+     expect(result).toEqual(lock);
+   });
+ 
+   it('getLock returns undefined when no lock', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     const result = await svc.getLock('acme/app');
+     expect(result).toBeUndefined();
+   });
+@@ -539,7 +539,7 @@ describe('RepoLocksService', () => {
+     const client = makeClient(() => ({
+       Item: { repoFullName: 'acme/app', lockOwner: 'o', ttl, acquiredAt: 'x' },
+     }));
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     const result = await svc.isLocked('acme/app');
+     expect(result).toBe(true);
+   });
+@@ -549,14 +549,14 @@ describe('RepoLocksService', () => {
+     const client = makeClient(() => ({
+       Item: { repoFullName: 'acme/app', lockOwner: 'o', ttl, acquiredAt: 'x' },
+     }));
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     const result = await svc.isLocked('acme/app');
+     expect(result).toBe(false);
+   });
+ 
+   it('isLocked returns false when no lock exists', async () => {
+     const client = makeClient(() => ({}));
+-    const svc = new RepoLocksService(client);
++    const svc = new RepoLocksService(client, 'telos-repo-locks', 1800);
+     const result = await svc.isLocked('acme/app');
+     expect(result).toBe(false);
+   });
+diff --git a/packages/core/src/dynamodb/projects.ts b/packages/core/src/dynamodb/projects.ts
+index ffc413d..66277c4 100644
+--- a/packages/core/src/dynamodb/projects.ts
++++ b/packages/core/src/dynamodb/projects.ts
+@@ -6,15 +6,13 @@ import {
+   UpdateCommand,
+   type DynamoDBDocumentClient,
+ } from '@aws-sdk/lib-dynamodb';
+-import { getConfig } from '../config/index.js';
+ import type { Project } from './types.js';
+ 
+ export class ProjectsService {
+-  private readonly tableName: string;
+-
+-  constructor(private readonly client: DynamoDBDocumentClient) {
+-    this.tableName = getConfig().DYNAMODB_TABLE_PROJECTS;
+-  }
++  constructor(
++    private readonly client: DynamoDBDocumentClient,
++    private readonly tableName: string,
++  ) {}
+ 
+   async createProject(project: Project): Promise<void> {
+     await this.client.send(
+diff --git a/packages/core/src/dynamodb/repo-locks.ts b/packages/core/src/dynamodb/repo-locks.ts
+index e591d53..4e6fdee 100644
+--- a/packages/core/src/dynamodb/repo-locks.ts
++++ b/packages/core/src/dynamodb/repo-locks.ts
+@@ -8,18 +8,18 @@ import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
+ import { getConfig } from '../config/index.js';
+ import { LockConflictError } from '../errors/index.js';
+ import type { RepoLock } from './types.js';
++import { type TelosConfig } from '../config/index.js';
+ 
+ export class RepoLocksService {
+-  private readonly tableName: string;
+-
+-  constructor(private readonly client: DynamoDBDocumentClient) {
+-    this.tableName = getConfig().DYNAMODB_TABLE_REPO_LOCKS;
+-  }
++  constructor(
++    private readonly client: DynamoDBDocumentClient,
++    private readonly tableName: string,
++    private readonly lockTtlSeconds: number,
++  ) {}
+ 
+   async acquireLock(repoFullName: string, lockOwner: string): Promise<void> {
+-    const config = getConfig();
+     const now = Math.floor(Date.now() / 1000);
+-    const ttl = now + config.REPO_LOCK_TTL_SECONDS;
++    const ttl = now + this.lockTtlSeconds;
+ 
+     const item: RepoLock = {
+       repoFullName,
+diff --git a/packages/core/src/dynamodb/runs.ts b/packages/core/src/dynamodb/runs.ts
+index 19f7e1d..a3d63ed 100644
+--- a/packages/core/src/dynamodb/runs.ts
++++ b/packages/core/src/dynamodb/runs.ts
+@@ -5,15 +5,13 @@ import {
+   UpdateCommand,
+   type DynamoDBDocumentClient,
+ } from '@aws-sdk/lib-dynamodb';
+-import { getConfig } from '../config/index.js';
+ import type { Run } from './types.js';
+ 
+ export class RunsService {
+-  private readonly tableName: string;
+-
+-  constructor(private readonly client: DynamoDBDocumentClient) {
+-    this.tableName = getConfig().DYNAMODB_TABLE_RUNS;
+-  }
++  constructor(
++    private readonly client: DynamoDBDocumentClient,
++    private readonly tableName: string,
++  ) {}
+ 
+   async createRun(run: Run): Promise<void> {
+     await this.client.send(
+diff --git a/packages/core/src/dynamodb/task-graphs.ts b/packages/core/src/dynamodb/task-graphs.ts
+index 5490532..bd4cf93 100644
+--- a/packages/core/src/dynamodb/task-graphs.ts
++++ b/packages/core/src/dynamodb/task-graphs.ts
+@@ -5,15 +5,13 @@ import {
+   UpdateCommand,
+   type DynamoDBDocumentClient,
+ } from '@aws-sdk/lib-dynamodb';
+-import { getConfig } from '../config/index.js';
+ import type { Task } from './types.js';
+ 
+ export class TaskGraphsService {
+-  private readonly tableName: string;
+-
+-  constructor(private readonly client: DynamoDBDocumentClient) {
+-    this.tableName = getConfig().DYNAMODB_TABLE_TASK_GRAPHS;
+-  }
++  constructor(
++    private readonly client: DynamoDBDocumentClient,
++    private readonly tableName: string,
++  ) {}
+ 
+   async putGraph(tasks: Task[]): Promise<void> {
+     const BATCH_SIZE = 25;
+diff --git a/packages/core/src/dynamodb/task-outputs.ts b/packages/core/src/dynamodb/task-outputs.ts
+index 67a7f8a..231e4cf 100644
+--- a/packages/core/src/dynamodb/task-outputs.ts
++++ b/packages/core/src/dynamodb/task-outputs.ts
+@@ -4,17 +4,15 @@ import {
+   UpdateCommand,
+   type DynamoDBDocumentClient,
+ } from '@aws-sdk/lib-dynamodb';
+-import { getConfig } from '../config/index.js';
+ import type { TaskOutput } from './types.js';
+ 
+ const TTL_SECONDS = 86400;
+ 
+ export class TaskOutputsService {
+-  private readonly tableName: string;
+-
+-  constructor(private readonly client: DynamoDBDocumentClient) {
+-    this.tableName = getConfig().DYNAMODB_TABLE_TASK_OUTPUTS;
+-  }
++  constructor(
++    private readonly client: DynamoDBDocumentClient,
++    private readonly tableName: string,
++  ) {}
+ 
+   private ttl(): number {
+     return Math.floor(Date.now() / 1000) + TTL_SECONDS;
+diff --git a/packages/lambdas/src/handlers/bootstrap-project.ts b/packages/lambdas/src/handlers/bootstrap-project.ts
+index 322d42b..149511e 100644
+--- a/packages/lambdas/src/handlers/bootstrap-project.ts
++++ b/packages/lambdas/src/handlers/bootstrap-project.ts
+@@ -1,19 +1,16 @@
+ import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
+-  ProjectsService,
+   GitHubConnector,
+   enqueueWorkItems,
+   PermanentError,
+ } from '@telos/core';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
++import { getProjectsService } from '../shared/lazy-services.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const projectsService = new ProjectsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ 
+ function parseDescription(issueBody: string): string {
+@@ -55,7 +52,7 @@ export const handler = wrapHandler(async (input, logger) => {
+ 
+   // Create project record — idempotent via conditional write
+   try {
+-    await projectsService.createProject({
++    await getProjectsService().createProject({
+       projectId,
+       status: 'BOOTSTRAPPING',
+       repoOwner,
+diff --git a/packages/lambdas/src/handlers/bootstrap-repo.ts b/packages/lambdas/src/handlers/bootstrap-repo.ts
+index fefabc7..392c88c 100644
+--- a/packages/lambdas/src/handlers/bootstrap-repo.ts
++++ b/packages/lambdas/src/handlers/bootstrap-repo.ts
+@@ -1,19 +1,16 @@
+ import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
+-  ProjectsService,
+   GitHubConnector,
+   enqueueWorkItems,
+   PermanentError,
+ } from '@telos/core';
++import { getProjectsService } from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const projectsService = new ProjectsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ 
+ export const handler = wrapHandler(async (input, logger) => {
+@@ -28,7 +25,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   // Load project record from DynamoDB
+-  const project = await projectsService.getProject(projectId);
++  const project = await getProjectsService().getProject(projectId);
+   if (!project) {
+     throw new PermanentError(`Project ${projectId} not found`);
+   }
+@@ -63,7 +60,7 @@ export const handler = wrapHandler(async (input, logger) => {
+ 
+   // Update project status to PLANNING
+   const now = new Date().toISOString();
+-  await projectsService.updateProjectStatus(projectId, 'PLANNING', now);
++  await getProjectsService().updateProjectStatus(projectId, 'PLANNING', now);
+   logger.info('Project status updated to PLANNING', { projectId });
+ 
+   // Enqueue the follow-on work item
+diff --git a/packages/lambdas/src/handlers/create-issues.ts b/packages/lambdas/src/handlers/create-issues.ts
+index 277a43f..93dbda6 100644
+--- a/packages/lambdas/src/handlers/create-issues.ts
++++ b/packages/lambdas/src/handlers/create-issues.ts
+@@ -1,19 +1,16 @@
+ import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
+-  TaskGraphsService,
+   GitHubConnector,
+   enqueueWorkItems,
+   PermanentError,
+ } from '@telos/core';
++import { getTaskGraphsService } from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const taskGraphsService = new TaskGraphsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ 
+ /**
+@@ -70,7 +67,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+   const [repoOwner, repoName] = parts as [string, string];
+ 
+-  const allTasks = await taskGraphsService.getGraph(projectId);
++  const allTasks = await getTaskGraphsService().getGraph(projectId);
+   if (allTasks.length === 0) {
+     throw new PermanentError(`No tasks found for project ${projectId}`);
+   }
+@@ -102,7 +99,7 @@ export const handler = wrapHandler(async (input, logger) => {
+     const issue = await githubConnector.createIssue(repoOwner, repoName, task.title, body, labels);
+     logger.info('GitHub issue created', { taskId: task.taskId, issueNumber: issue.number });
+ 
+-    await taskGraphsService.updateTaskStatus(projectId, task.taskId, task.status, {
++    await getTaskGraphsService().updateTaskStatus(projectId, task.taskId, task.status, {
+       issueNumber: issue.number,
+     });
+   }
+diff --git a/packages/lambdas/src/handlers/generate-architecture.ts b/packages/lambdas/src/handlers/generate-architecture.ts
+index 52002d2..0395197 100644
+--- a/packages/lambdas/src/handlers/generate-architecture.ts
++++ b/packages/lambdas/src/handlers/generate-architecture.ts
+@@ -1,17 +1,14 @@
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
+-  ProjectsService,
+   enqueueWorkItems,
+   PermanentError,
+ } from '@telos/core';
++import { getProjectsService } from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const projectsService = new ProjectsService(dynamoClient);
+ 
+ export const handler = wrapHandler(async (input, logger) => {
+   const phase = typeof input['phase'] === 'string' ? input['phase'] : 'START';
+@@ -26,7 +23,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   if (phase === 'START') {
+-    const project = await projectsService.getProject(projectId);
++    const project = await getProjectsService().getProject(projectId);
+     if (!project) {
+       throw new PermanentError(`Project ${projectId} not found`);
+     }
+diff --git a/packages/lambdas/src/handlers/merge-pr.ts b/packages/lambdas/src/handlers/merge-pr.ts
+index dc0b480..4efa754 100644
+--- a/packages/lambdas/src/handlers/merge-pr.ts
++++ b/packages/lambdas/src/handlers/merge-pr.ts
+@@ -1,20 +1,17 @@
+ import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
+-  TaskGraphsService,
+   GitHubConnector,
+   enqueueWorkItems,
+   evaluateMergePolicy,
+   PermanentError,
+ } from '@telos/core';
++import { getTaskGraphsService } from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const taskGraphsService = new TaskGraphsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ 
+ export const handler = wrapHandler(async (input, logger) => {
+@@ -37,7 +34,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+   const [repoOwner, repoName] = parts as [string, string];
+ 
+-  const task = await taskGraphsService.getTask(projectId, taskId);
++  const task = await getTaskGraphsService().getTask(projectId, taskId);
+   if (!task) {
+     throw new PermanentError(`Task ${taskId} not found in project ${projectId}`);
+   }
+@@ -47,7 +44,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   // Idempotency: if PR is already merged, skip the merge step
+   if (!pr.merged) {
+     // Check whether all predecessor tasks are completed
+-    const allTasks = await taskGraphsService.getGraph(projectId);
++    const allTasks = await getTaskGraphsService().getGraph(projectId);
+     const completedIds = new Set(
+       allTasks.filter((t) => t.status === 'COMPLETED').map((t) => t.taskId),
+     );
+@@ -105,7 +102,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   // Update task status to COMPLETED
+-  await taskGraphsService.updateTaskStatus(projectId, taskId, 'COMPLETED');
++  await getTaskGraphsService().updateTaskStatus(projectId, taskId, 'COMPLETED');
+ 
+   // Close the issue if present
+   if (task.issueNumber !== undefined) {
+@@ -114,7 +111,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   // Determine follow-on work items
+-  const readyTasks = await taskGraphsService.getReadyTasks(projectId);
++  const readyTasks = await getTaskGraphsService().getReadyTasks(projectId);
+   if (readyTasks.length > 0) {
+     const followOn = readyTasks.map((t) => ({
+       type: 'TRIGGER_TASK' as const,
+@@ -129,7 +126,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   // Check if all tasks are completed
+-  const allTasksAfter = await taskGraphsService.getGraph(projectId);
++  const allTasksAfter = await getTaskGraphsService().getGraph(projectId);
+   const allCompleted = allTasksAfter.every((t) => t.status === 'COMPLETED');
+ 
+   if (allCompleted) {
+diff --git a/packages/lambdas/src/handlers/plan-tasks.ts b/packages/lambdas/src/handlers/plan-tasks.ts
+index 2a0091c..c43f1a2 100644
+--- a/packages/lambdas/src/handlers/plan-tasks.ts
++++ b/packages/lambdas/src/handlers/plan-tasks.ts
+@@ -1,27 +1,23 @@
+ import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
+-  ProjectsService,
+-  TaskGraphsService,
+-  RunsService,
+-  TaskOutputsService,
+   GitHubConnector,
+   enqueueWorkItems,
+   PermanentError,
+   type Task,
+ } from '@telos/core';
++import {
++  getProjectsService,
++  getTaskGraphsService,
++  getRunsService,
++  getTaskOutputsService,
++} from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const projectsService = new ProjectsService(dynamoClient);
+-const taskGraphsService = new TaskGraphsService(dynamoClient);
+-const runsService = new RunsService(dynamoClient);
+-const taskOutputsService = new TaskOutputsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ 
+ /**
+@@ -95,7 +91,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const [repoOwner, repoName] = parts as [string, string];
+ 
+   if (phase === 'START') {
+-    const project = await projectsService.getProject(projectId);
++    const project = await getProjectsService().getProject(projectId);
+     if (!project) {
+       throw new PermanentError(`Project ${projectId} not found`);
+     }
+@@ -103,13 +99,13 @@ export const handler = wrapHandler(async (input, logger) => {
+     // Fetch HLD content from ECS task-outputs (architect run has taskId='')
+     let hldContent: string | undefined;
+ 
+-    const architectRuns = await runsService.queryRunsByProjectAndTask(projectId, '');
++    const architectRuns = await getRunsService().queryRunsByProjectAndTask(projectId, '');
+     const latestArchitectRun = architectRuns
+       .filter((r) => r.taskType === 'architect' && r.status === 'COMPLETED')
+       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+ 
+     if (latestArchitectRun) {
+-      const output = await taskOutputsService.readOutput(latestArchitectRun.runId);
++      const output = await getTaskOutputsService().readOutput(latestArchitectRun.runId);
+       if (output?.['hld']) {
+         hldContent =
+           typeof output['hld'] === 'string'
+@@ -190,12 +186,12 @@ export const handler = wrapHandler(async (input, logger) => {
+ 
+   // Attach projectId to each task and persist to DynamoDB
+   const tasksWithProject: Task[] = tasks.map((t) => ({ ...t, projectId }));
+-  await taskGraphsService.putGraph(tasksWithProject);
++  await getTaskGraphsService().putGraph(tasksWithProject);
+   logger.info('Task graph stored in DynamoDB', { projectId });
+ 
+   // Update project status to IN_PROGRESS
+   const now = new Date().toISOString();
+-  await projectsService.updateProjectStatus(projectId, 'IN_PROGRESS', now);
++  await getProjectsService().updateProjectStatus(projectId, 'IN_PROGRESS', now);
+ 
+   const followOn = [
+     { type: 'CREATE_ISSUES' as const, projectId, repoFullName, correlationId },
+diff --git a/packages/lambdas/src/handlers/quick-task.ts b/packages/lambdas/src/handlers/quick-task.ts
+index ee8600c..3fbec5f 100644
+--- a/packages/lambdas/src/handlers/quick-task.ts
++++ b/packages/lambdas/src/handlers/quick-task.ts
+@@ -3,20 +3,15 @@ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+   GitHubConnector,
+   PermanentError,
+-  ProjectsService,
+-  TaskGraphsService,
+-  createDynamoDBClient,
+   enqueueWorkItems,
+ } from '@telos/core';
+ import { v4 as uuidv4 } from 'uuid';
++import { getProjectsService, getTaskGraphsService } from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const projectsService = new ProjectsService(dynamoClient);
+-const taskGraphsService = new TaskGraphsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ 
+ export const handler = wrapHandler(async (input, logger) => {
+@@ -44,7 +39,7 @@ export const handler = wrapHandler(async (input, logger) => {
+ 
+   // Create project record (idempotent — ConditionalCheckFailedException means already exists)
+   try {
+-    await projectsService.createProject({
++    await getProjectsService().createProject({
+       projectId,
+       status: 'IN_PROGRESS',
+       repoOwner,
+@@ -65,7 +60,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   // Create single-task graph
+-  await taskGraphsService.putGraph([
++  await getTaskGraphsService().putGraph([
+     {
+       projectId,
+       taskId,
+diff --git a/packages/lambdas/src/handlers/rebase-pr.ts b/packages/lambdas/src/handlers/rebase-pr.ts
+index 3f8ef83..998c137 100644
+--- a/packages/lambdas/src/handlers/rebase-pr.ts
++++ b/packages/lambdas/src/handlers/rebase-pr.ts
+@@ -1,17 +1,14 @@
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
+-  TaskGraphsService,
+   enqueueWorkItems,
+   PermanentError,
+ } from '@telos/core';
++import { getTaskGraphsService } from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const taskGraphsService = new TaskGraphsService(dynamoClient);
+ 
+ export const handler = wrapHandler(async (input, logger) => {
+   const phase = typeof input['phase'] === 'string' ? input['phase'] : 'START';
+@@ -35,7 +32,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const [repoOwner, repoName] = parts as [string, string];
+ 
+   if (phase === 'START') {
+-    const task = await taskGraphsService.getTask(projectId, taskId);
++    const task = await getTaskGraphsService().getTask(projectId, taskId);
+     if (!task) {
+       throw new PermanentError(`Task ${taskId} not found in project ${projectId}`);
+     }
+@@ -85,7 +82,7 @@ export const handler = wrapHandler(async (input, logger) => {
+       taskId,
+       prNumber,
+     });
+-    await taskGraphsService.updateTaskStatus(projectId, taskId, 'FAILED');
++    await getTaskGraphsService().updateTaskStatus(projectId, taskId, 'FAILED');
+     return { status: 'SUCCESS', output: { followOn: [] } };
+   }
+ 
+diff --git a/packages/lambdas/src/handlers/reconcile-enqueuer.ts b/packages/lambdas/src/handlers/reconcile-enqueuer.ts
+index 8906be7..7ed0262 100644
+--- a/packages/lambdas/src/handlers/reconcile-enqueuer.ts
++++ b/packages/lambdas/src/handlers/reconcile-enqueuer.ts
+@@ -1,11 +1,10 @@
+ import { SQSClient } from '@aws-sdk/client-sqs';
+-import { ProjectsService, createDynamoDBClient, enqueueWorkItems } from '@telos/core';
++import { enqueueWorkItems } from '@telos/core';
+ import { v4 as uuidv4 } from 'uuid';
++import { getProjectsService } from '../shared/lazy-services.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const projectsService = new ProjectsService(dynamoClient);
+ 
+ /**
+  * Invoked hourly by CloudWatch Events. Scans active projects and enqueues
+@@ -13,8 +12,8 @@ const projectsService = new ProjectsService(dynamoClient);
+  */
+ export const handler = async (_event: unknown): Promise<void> => {
+   const [inProgressProjects, planningProjects] = await Promise.all([
+-    projectsService.listProjectsByStatus('IN_PROGRESS'),
+-    projectsService.listProjectsByStatus('PLANNING'),
++    getProjectsService().listProjectsByStatus('IN_PROGRESS'),
++    getProjectsService().listProjectsByStatus('PLANNING'),
+   ]);
+ 
+   const activeProjects = [...inProgressProjects, ...planningProjects];
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 48691b3..73b291e 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -4,22 +4,19 @@ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+   GitHubConnector,
+   PermanentError,
+-  ProjectsService,
+-  RunsService,
+-  TaskGraphsService,
+-  createDynamoDBClient,
+   enqueueWorkItems,
+   getConfig,
+ } from '@telos/core';
++import {
++  getProjectsService,
++  getTaskGraphsService,
++  getRunsService,
++} from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const projectsService = new ProjectsService(dynamoClient);
+-const taskGraphsService = new TaskGraphsService(dynamoClient);
+-const runsService = new RunsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ const ecsClient = new ECSClient({});
+ 
+@@ -40,7 +37,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+   const [repoOwner, repoName] = parts as [string, string];
+ 
+-  const project = await projectsService.getProject(projectId);
++  const project = await getProjectsService().getProject(projectId);
+   if (!project) {
+     throw new PermanentError(`Project ${projectId} not found`);
+   }
+@@ -76,7 +73,7 @@ export const handler = wrapHandler(async (input, logger) => {
+     status: string;
+   }> = [];
+ 
+-  const allTasks = await taskGraphsService.getGraph(projectId);
++  const allTasks = await getTaskGraphsService().getGraph(projectId);
+ 
+   // --- Stuck task check and orphaned ECS run detection ---
+   const activeTasks = allTasks.filter(
+@@ -84,7 +81,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   );
+ 
+   for (const task of activeTasks) {
+-    const runs = await runsService.queryRunsByProjectAndTask(projectId, task.taskId);
++    const runs = await getRunsService().queryRunsByProjectAndTask(projectId, task.taskId);
+ 
+     // Check orphaned ECS runs: STARTING runs with ecsTaskArn where ECS task is stopped
+     const startingRunsWithArn = runs.filter((r) => r.status === 'STARTING' && r.ecsTaskArn);
+@@ -98,7 +95,7 @@ export const handler = wrapHandler(async (input, logger) => {
+         );
+         const ecsTask = describeResult.tasks?.[0];
+         if (!ecsTask || ecsTask.lastStatus === 'STOPPED') {
+-          await runsService.updateRunStatus(run.runId, 'FAILED', {
++          await getRunsService().updateRunStatus(run.runId, 'FAILED', {
+             completedAt: new Date().toISOString(),
+             error: 'ECS task stopped unexpectedly (detected by reconcile)',
+           });
+@@ -123,7 +120,7 @@ export const handler = wrapHandler(async (input, logger) => {
+         logger.warn('IN_PROGRESS task has no runs — resetting to PENDING', {
+           taskId: task.taskId,
+         });
+-        await taskGraphsService.updateTaskStatus(projectId, task.taskId, 'PENDING');
++        await getTaskGraphsService().updateTaskStatus(projectId, task.taskId, 'PENDING');
+         if (!enqueuedTaskIds.has(task.taskId)) {
+           enqueuedTaskIds.add(task.taskId);
+           triggerItems.push({
+@@ -150,7 +147,7 @@ export const handler = wrapHandler(async (input, logger) => {
+         latestRunStartedAt: latestRun.startedAt,
+         timeoutMinutes: project.timeoutMinutes,
+       });
+-      await taskGraphsService.updateTaskStatus(projectId, task.taskId, 'PENDING');
++      await getTaskGraphsService().updateTaskStatus(projectId, task.taskId, 'PENDING');
+       if (!enqueuedTaskIds.has(task.taskId)) {
+         enqueuedTaskIds.add(task.taskId);
+         triggerItems.push({
+@@ -166,7 +163,7 @@ export const handler = wrapHandler(async (input, logger) => {
+ 
+   // --- Check REVIEW tasks with merged PRs ---
+   // Re-read tasks to reflect any status changes from the stuck-task loop above
+-  const tasksAfterStuckCheck = await taskGraphsService.getGraph(projectId);
++  const tasksAfterStuckCheck = await getTaskGraphsService().getGraph(projectId);
+   const reviewTasks = tasksAfterStuckCheck.filter(
+     (t) => t.status === 'REVIEW' && t.prNumber !== undefined,
+   );
+@@ -179,10 +176,10 @@ export const handler = wrapHandler(async (input, logger) => {
+           taskId: task.taskId,
+           prNumber: task.prNumber,
+         });
+-        await taskGraphsService.updateTaskStatus(projectId, task.taskId, 'COMPLETED');
++        await getTaskGraphsService().updateTaskStatus(projectId, task.taskId, 'COMPLETED');
+ 
+         // Enqueue TRIGGER_TASK for any newly ready tasks
+-        const readyTasks = await taskGraphsService.getReadyTasks(projectId);
++        const readyTasks = await getTaskGraphsService().getReadyTasks(projectId);
+         for (const ready of readyTasks) {
+           if (!enqueuedTaskIds.has(ready.taskId)) {
+             enqueuedTaskIds.add(ready.taskId);
+@@ -205,7 +202,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   // --- Project completion check ---
+-  const finalTasks = await taskGraphsService.getGraph(projectId);
++  const finalTasks = await getTaskGraphsService().getGraph(projectId);
+   const allCompleted =
+     finalTasks.length > 0 && finalTasks.every((t) => t.status === 'COMPLETED');
+   const hasActiveTasks = finalTasks.some(
+diff --git a/packages/lambdas/src/handlers/review-pr.ts b/packages/lambdas/src/handlers/review-pr.ts
+index 0af92e2..4c38083 100644
+--- a/packages/lambdas/src/handlers/review-pr.ts
++++ b/packages/lambdas/src/handlers/review-pr.ts
+@@ -1,12 +1,11 @@
+ import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
+-  TaskGraphsService,
+   GitHubConnector,
+   enqueueWorkItems,
+   PermanentError,
+ } from '@telos/core';
++import { getTaskGraphsService } from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+@@ -15,8 +14,6 @@ const MAX_REVISION_CYCLES = 3;
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const taskGraphsService = new TaskGraphsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ 
+ export const handler = wrapHandler(async (input, logger) => {
+@@ -41,7 +38,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const [repoOwner, repoName] = parts as [string, string];
+ 
+   if (phase === 'START') {
+-    const task = await taskGraphsService.getTask(projectId, taskId);
++    const task = await getTaskGraphsService().getTask(projectId, taskId);
+     if (!task) {
+       throw new PermanentError(`Task ${taskId} not found in project ${projectId}`);
+     }
+@@ -160,7 +157,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   // REQUEST_CHANGES — check revision count
+-  const task = await taskGraphsService.getTask(projectId, taskId);
++  const task = await getTaskGraphsService().getTask(projectId, taskId);
+   const revisionCount = task?.revisionCount ?? 0;
+ 
+   if (revisionCount >= MAX_REVISION_CYCLES) {
+@@ -169,7 +166,7 @@ export const handler = wrapHandler(async (input, logger) => {
+       prNumber,
+       revisionCount,
+     });
+-    await taskGraphsService.updateTaskStatus(projectId, taskId, 'FAILED');
++    await getTaskGraphsService().updateTaskStatus(projectId, taskId, 'FAILED');
+     return { status: 'SUCCESS', output: { followOn: [] } };
+   }
+ 
+diff --git a/packages/lambdas/src/handlers/revise-pr.ts b/packages/lambdas/src/handlers/revise-pr.ts
+index 34bfb02..4ca0ac0 100644
+--- a/packages/lambdas/src/handlers/revise-pr.ts
++++ b/packages/lambdas/src/handlers/revise-pr.ts
+@@ -1,20 +1,17 @@
+ import { SSMClient } from '@aws-sdk/client-ssm';
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
+-  TaskGraphsService,
+   GitHubConnector,
+   enqueueWorkItems,
+   PermanentError,
+ } from '@telos/core';
++import { getTaskGraphsService } from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const taskGraphsService = new TaskGraphsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ 
+ export const handler = wrapHandler(async (input, logger) => {
+@@ -41,7 +38,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   const [repoOwner, repoName] = parts as [string, string];
+ 
+   if (phase === 'START') {
+-    const task = await taskGraphsService.getTask(projectId, taskId);
++    const task = await getTaskGraphsService().getTask(projectId, taskId);
+     if (!task) {
+       throw new PermanentError(`Task ${taskId} not found in project ${projectId}`);
+     }
+@@ -111,11 +108,11 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   // COMPLETED — increment revisionCount and re-enqueue REVIEW_PR
+-  const task = await taskGraphsService.getTask(projectId, taskId);
++  const task = await getTaskGraphsService().getTask(projectId, taskId);
+   const currentRevisionCount = task?.revisionCount ?? 0;
+   const newRevisionCount = currentRevisionCount + 1;
+ 
+-  await taskGraphsService.updateTaskStatus(projectId, taskId, 'REVIEW', {
++  await getTaskGraphsService().updateTaskStatus(projectId, taskId, 'REVIEW', {
+     revisionCount: newRevisionCount,
+   });
+ 
+diff --git a/packages/lambdas/src/handlers/trigger-task.ts b/packages/lambdas/src/handlers/trigger-task.ts
+index efee4a4..7a5ba2b 100644
+--- a/packages/lambdas/src/handlers/trigger-task.ts
++++ b/packages/lambdas/src/handlers/trigger-task.ts
+@@ -1,17 +1,14 @@
+ import { SQSClient } from '@aws-sdk/client-sqs';
+ import {
+-  createDynamoDBClient,
+-  TaskGraphsService,
+   enqueueWorkItems,
+   PermanentError,
+ } from '@telos/core';
++import { getTaskGraphsService } from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ import { startEcsTask, pollEcsTask } from '../shared/ecs-task-runner.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const sqsClient = new SQSClient({});
+-const dynamoClient = createDynamoDBClient();
+-const taskGraphsService = new TaskGraphsService(dynamoClient);
+ 
+ export const handler = wrapHandler(async (input, logger) => {
+   const phase = typeof input['phase'] === 'string' ? input['phase'] : 'START';
+@@ -27,7 +24,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   if (phase === 'START') {
+-    const task = await taskGraphsService.getTask(projectId, taskId);
++    const task = await getTaskGraphsService().getTask(projectId, taskId);
+     if (!task) {
+       throw new PermanentError(`Task ${taskId} not found in project ${projectId}`);
+     }
+@@ -72,7 +69,7 @@ export const handler = wrapHandler(async (input, logger) => {
+ 
+   if (pollResult.status === 'FAILED') {
+     logger.warn('Developer ECS task failed', { taskId, error: pollResult.error });
+-    await taskGraphsService.updateTaskStatus(projectId, taskId, 'FAILED');
++    await getTaskGraphsService().updateTaskStatus(projectId, taskId, 'FAILED');
+     return { status: 'SUCCESS', output: { followOn: [] } };
+   }
+ 
+@@ -87,7 +84,7 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+ 
+   // Update task to REVIEW status and record PR number
+-  await taskGraphsService.updateTaskStatus(projectId, taskId, 'REVIEW', { prNumber });
++  await getTaskGraphsService().updateTaskStatus(projectId, taskId, 'REVIEW', { prNumber });
+ 
+   const followOn = [
+     {
+diff --git a/packages/lambdas/src/handlers/update-status.ts b/packages/lambdas/src/handlers/update-status.ts
+index 10abea7..bb801cb 100644
+--- a/packages/lambdas/src/handlers/update-status.ts
++++ b/packages/lambdas/src/handlers/update-status.ts
+@@ -1,18 +1,13 @@
+ import { SSMClient } from '@aws-sdk/client-ssm';
+ import {
+-  createDynamoDBClient,
+-  ProjectsService,
+-  TaskGraphsService,
+   GitHubConnector,
+   PermanentError,
+ } from '@telos/core';
++import { getProjectsService, getTaskGraphsService } from '../shared/lazy-services.js';
+ import { wrapHandler } from '../shared/handler-wrapper.js';
+ 
+ // Module-level clients and services — warm across Lambda invocations
+ const ssmClient = new SSMClient({});
+-const dynamoClient = createDynamoDBClient();
+-const projectsService = new ProjectsService(dynamoClient);
+-const taskGraphsService = new TaskGraphsService(dynamoClient);
+ const githubConnector = new GitHubConnector(ssmClient);
+ 
+ export const handler = wrapHandler(async (input, logger) => {
+@@ -30,18 +25,18 @@ export const handler = wrapHandler(async (input, logger) => {
+   }
+   const [repoOwner, repoName] = parts as [string, string];
+ 
+-  const project = await projectsService.getProject(projectId);
++  const project = await getProjectsService().getProject(projectId);
+   if (!project) {
+     throw new PermanentError(`Project ${projectId} not found`);
+   }
+ 
+   // Update project status to COMPLETED
+   const now = new Date().toISOString();
+-  await projectsService.updateProjectStatus(projectId, 'COMPLETED', now);
++  await getProjectsService().updateProjectStatus(projectId, 'COMPLETED', now);
+   logger.info('Project marked COMPLETED', { projectId });
+ 
+   // Build summary
+-  const allTasks = await taskGraphsService.getGraph(projectId);
++  const allTasks = await getTaskGraphsService().getGraph(projectId);
+   const taskCount = allTasks.length;
+   const mergedCount = allTasks.filter((t) => t.status === 'COMPLETED').length;
+   const repoLink = `https://github.com/${repoOwner}/${repoName}`;
+diff --git a/packages/lambdas/src/shared/ecs-task-runner.ts b/packages/lambdas/src/shared/ecs-task-runner.ts
+index ec02819..84ea813 100644
+--- a/packages/lambdas/src/shared/ecs-task-runner.ts
++++ b/packages/lambdas/src/shared/ecs-task-runner.ts
+@@ -5,11 +5,9 @@ import {
+ } from '@aws-sdk/client-ecs';
+ import { v4 as uuidv4 } from 'uuid';
+ import {
+-  createDynamoDBClient,
+-  RunsService,
+-  TaskOutputsService,
+   getConfig,
+ } from '@telos/core';
++import { dynamoClient, getRunsService, getTaskOutputsService } from './lazy-services.js';
+ 
+ export type EcsTaskType =
+   | 'architect'
+@@ -49,9 +47,8 @@ export async function startEcsTask(params: EcsStartParams): Promise<EcsStartResu
+   const { taskType, input, projectId, taskId, repoFullName, correlationId } = params;
+   const config = getConfig();
+   const runId = uuidv4();
+-  const dbClient = createDynamoDBClient();
+-  const taskOutputsSvc = new TaskOutputsService(dbClient);
+-  const runsSvc = new RunsService(dbClient);
++  const taskOutputsSvc = getTaskOutputsService();
++  const runsSvc = getRunsService();
+ 
+   // Write input to task-outputs
+   await taskOutputsSvc.writeInput(runId, input);
+@@ -146,9 +143,8 @@ export async function pollEcsTask(params: {
+   const container = task.containers?.[0];
+   const exitCode = container?.exitCode ?? 1;
+ 
+-  const dbClient = createDynamoDBClient();
+-  const runsSvc = new RunsService(dbClient);
+-  const taskOutputsSvc = new TaskOutputsService(dbClient);
++  const runsSvc = getRunsService();
++  const taskOutputsSvc = getTaskOutputsService();
+ 
+   if (exitCode !== 0) {
+     const reason = container?.reason ?? `exit code ${exitCode}`;
+diff --git a/packages/worker/src/entrypoint.ts b/packages/worker/src/entrypoint.ts
+index 6958f5b..4c54569 100644
+--- a/packages/worker/src/entrypoint.ts
++++ b/packages/worker/src/entrypoint.ts
+@@ -2,9 +2,10 @@ import { fileURLToPath } from 'node:url';
+ import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
+ import {
+   PermanentError,
++  createLogger,
+   TaskOutputsService,
+   createDynamoDBClient,
+-  createLogger,
++  getConfig,
+   type Logger,
+ } from '@telos/core';
+ import { ArchitectWorker } from './workers/architect-worker.js';
+@@ -115,13 +116,24 @@ export async function runEntrypoint(
+   logger.info('Output written to task-outputs', { runId });
+ }
+ 
++const dynamoDbClient = createDynamoDBClient();
++let taskOutputsServiceInstance: TaskOutputsService | undefined;
++function getTaskOutputsService(): TaskOutputsService {
++  if (!taskOutputsServiceInstance) {
++    taskOutputsServiceInstance = new TaskOutputsService(
++      dynamoDbClient,
++      getConfig().DYNAMODB_TABLE_TASK_OUTPUTS,
++    );
++  }
++  return taskOutputsServiceInstance;
++}
++
+ async function main(): Promise<void> {
+   const correlationId = process.env['CORRELATION_ID'];
+   const runId = process.env['RUN_ID'];
+   const logger = createLogger(correlationId);
+   const ssmClient = new SSMClient({ region: process.env['AWS_REGION'] ?? 'us-east-1' });
+-  const dbClient = createDynamoDBClient();
+-  const taskOutputsSvc = new TaskOutputsService(dbClient);
++  const taskOutputsSvc = getTaskOutputsService();
+ 
+   try {
+     await runEntrypoint(process.env, ssmClient, taskOutputsSvc, logger);

@@ -1,0 +1,235 @@
+diff --git a/packages/core/src/prompts/__tests__/prompts.test.ts b/packages/core/src/prompts/__tests__/prompts.test.ts
+index 15c9015..e46063c 100644
+--- a/packages/core/src/prompts/__tests__/prompts.test.ts
++++ b/packages/core/src/prompts/__tests__/prompts.test.ts
+@@ -45,6 +45,7 @@ const baseContinuityState: ContinuityState = {
+     },
+   ],
+   worldState: { weather: 'overcast' },
++  locations: { 'Forest': 'Ch. 1: Tall trees, ancient' },
+ };
+ 
+ // ---------------------------------------------------------------------------
+@@ -287,6 +288,7 @@ describe('buildWriterPrompt', () => {
+     expect(result).toContain('"timeline"');
+     expect(result).toContain('"plotThreads"');
+     expect(result).toContain('"worldState"');
++    expect(result).toContain('"locations"');
+   });
+ 
+   it('includes story dependencies section with predecessor chapters', () => {
+@@ -385,6 +387,7 @@ describe('buildEditorPrompt', () => {
+     const result = buildEditorPrompt(params);
+     expect(result).toContain('"characters"');
+     expect(result).toContain('"worldState"');
++    expect(result).toContain('"locations"');
+   });
+ 
+   it('specifies APPROVE verdict format', () => {
+@@ -570,6 +573,7 @@ describe('buildContinuityCheckerPrompt', () => {
+   it('includes pruned continuity state snapshot for context', () => {
+     const result = buildContinuityCheckerPrompt(params);
+     expect(result).toContain('"characters"');
++    expect(result).toContain('"locations"');
+     expect(result).toContain('recent window');
+   });
+ 
+diff --git a/packages/core/src/writing/__tests__/writing.test.ts b/packages/core/src/writing/__tests__/writing.test.ts
+index f2bc211..fbb85a9 100644
+--- a/packages/core/src/writing/__tests__/writing.test.ts
++++ b/packages/core/src/writing/__tests__/writing.test.ts
+@@ -43,6 +43,7 @@ const baseContinuity: ContinuityState = {
+     },
+   ],
+   worldState: { weather: 'sunny' },
++  locations: { 'Forest': 'Ch. 1: Tall trees, ancient' },
+ };
+ 
+ describe('mergeContinuityState', () => {
+@@ -148,6 +149,23 @@ describe('mergeContinuityState', () => {
+     expect(result.worldState['weather']).toBe('snowy');
+   });
+ 
++  it('merges locations entries', () => {
++    const update: Partial<ContinuityState> = {
++      locations: { 'Village': 'Ch. 2: Small settlement' },
++    };
++    const result = mergeContinuityState(baseContinuity, update);
++    expect(result.locations['Forest']).toBe('Ch. 1: Tall trees, ancient');
++    expect(result.locations['Village']).toBe('Ch. 2: Small settlement');
++  });
++
++  it('updates existing location on key conflict', () => {
++    const update: Partial<ContinuityState> = {
++      locations: { 'Forest': 'Ch. 5: Burnt to ash' },
++    };
++    const result = mergeContinuityState(baseContinuity, update);
++    expect(result.locations['Forest']).toBe('Ch. 5: Burnt to ash');
++  });
++
+   it('preserves fields not included in update', () => {
+     const result = mergeContinuityState(baseContinuity, {});
+     expect(result.characters).toHaveLength(1);
+@@ -179,6 +197,7 @@ describe('pruneContinuityState', () => {
+       },
+     ],
+     worldState: { weather: 'stormy', season: 'winter' },
++    locations: baseContinuity.locations,
+   };
+ 
+   it('keeps only last N timeline entries', () => {
+@@ -204,6 +223,11 @@ describe('pruneContinuityState', () => {
+     expect(pruned.worldState).toEqual(largeContinuity.worldState);
+   });
+ 
++  it('preserves all locations', () => {
++    const pruned = pruneContinuityState(largeContinuity, 5);
++    expect(pruned.locations).toEqual(largeContinuity.locations);
++  });
++
+   it('preserves plot thread metadata (status, title, etc.)', () => {
+     const pruned = pruneContinuityState(largeContinuity, 5);
+     expect(pruned.plotThreads[0]!.threadId).toBe('thread-1');
+diff --git a/packages/core/src/writing/continuity.ts b/packages/core/src/writing/continuity.ts
+index 0719427..f742a04 100644
+--- a/packages/core/src/writing/continuity.ts
++++ b/packages/core/src/writing/continuity.ts
+@@ -55,7 +55,7 @@ function mergePlotThreads(existing: PlotThread[], updates: PlotThread[]): PlotTh
+  *
+  * - timeline: keep only the last `windowSize` entries
+  * - plotThreads: keep all threads but truncate keyEvents to last `windowSize`
+- * - characters & worldState: kept in full (already bounded)
++ * - characters, worldState & locations: kept in full (already bounded)
+  */
+ export function pruneContinuityState(
+   state: ContinuityState,
+@@ -69,6 +69,7 @@ export function pruneContinuityState(
+       keyEvents: (thread.keyEvents ?? []).slice(-windowSize),
+     })),
+     worldState: state.worldState,
++    locations: state.locations,
+   };
+ }
+ 
+@@ -90,5 +91,9 @@ export function mergeContinuityState(
+       update.worldState !== undefined
+         ? { ...existing.worldState, ...update.worldState }
+         : existing.worldState,
++    locations:
++      update.locations !== undefined
++        ? { ...existing.locations, ...update.locations }
++        : existing.locations,
+   };
+ }
+diff --git a/packages/core/src/writing/types.ts b/packages/core/src/writing/types.ts
+index ea88a4d..fda98b0 100644
+--- a/packages/core/src/writing/types.ts
++++ b/packages/core/src/writing/types.ts
+@@ -32,6 +32,7 @@ export interface ContinuityState {
+   timeline: TimelineEntry[];
+   plotThreads: PlotThread[];
+   worldState: Record<string, string>;
++  locations: Record<string, string>;
+ }
+ 
+ export type StyleIssueType = 'tense-shift' | 'pov-shift' | 'passive-voice-excess';
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+index 345fb1c..cbda120 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+@@ -206,6 +206,7 @@ describe('CONTINUITY_CHECK — happy path', () => {
+       timeline: [],
+       plotThreads: [],
+       worldState: {},
++      locations: {},
+     });
+     expect(mockGitHubClientMethods.getFileContent).not.toHaveBeenCalled();
+   });
+@@ -372,6 +373,7 @@ describe('CONTINUITY_CHECK — continuity state architecture', () => {
+       timeline: [],
+       plotThreads: [],
+       worldState: {},
++      locations: {},
+     });
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+index d2fdf18..ba67d18 100644
+--- a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+@@ -222,6 +222,7 @@ describe('REVIEW_CHAPTER — happy path', () => {
+       timeline: [],
+       plotThreads: [],
+       worldState: {},
++      locations: {},
+     });
+     expect(mockGitHubClientMethods.getFileContent).not.toHaveBeenCalled();
+   });
+@@ -318,6 +319,7 @@ describe('REVIEW_CHAPTER — happy path', () => {
+       timeline: [],
+       plotThreads: [],
+       worldState: {},
++      locations: {},
+     });
+   });
+ 
+diff --git a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+index 0b044fb..78e661c 100644
+--- a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+@@ -268,6 +268,7 @@ describe('TRIGGER_CHAPTER — happy path', () => {
+       timeline: [],
+       plotThreads: [],
+       worldState: {},
++      locations: {},
+     });
+     expect(params.predecessorChapters).toEqual([]);
+   });
+diff --git a/packages/lambdas/src/handlers/continuity-check.ts b/packages/lambdas/src/handlers/continuity-check.ts
+index d3db2a5..456267b 100644
+--- a/packages/lambdas/src/handlers/continuity-check.ts
++++ b/packages/lambdas/src/handlers/continuity-check.ts
+@@ -18,6 +18,7 @@ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+   timeline: [],
+   plotThreads: [],
+   worldState: {},
++  locations: {},
+ };
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+diff --git a/packages/lambdas/src/handlers/review-chapter.ts b/packages/lambdas/src/handlers/review-chapter.ts
+index 8adb20f..5382179 100644
+--- a/packages/lambdas/src/handlers/review-chapter.ts
++++ b/packages/lambdas/src/handlers/review-chapter.ts
+@@ -18,6 +18,7 @@ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+   timeline: [],
+   plotThreads: [],
+   worldState: {},
++  locations: {},
+ };
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+diff --git a/packages/lambdas/src/handlers/trigger-chapter.ts b/packages/lambdas/src/handlers/trigger-chapter.ts
+index cc7047c..226b819 100644
+--- a/packages/lambdas/src/handlers/trigger-chapter.ts
++++ b/packages/lambdas/src/handlers/trigger-chapter.ts
+@@ -19,6 +19,7 @@ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+   timeline: [],
+   plotThreads: [],
+   worldState: {},
++  locations: {},
+ };
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+diff --git a/packages/worker/src/workers/continuity-checker.ts b/packages/worker/src/workers/continuity-checker.ts
+index 5c54f2c..9fce4ae 100644
+--- a/packages/worker/src/workers/continuity-checker.ts
++++ b/packages/worker/src/workers/continuity-checker.ts
+@@ -10,6 +10,7 @@ const EMPTY_STATE: ContinuityState = {
+   timeline: [],
+   plotThreads: [],
+   worldState: {},
++  locations: {},
+ };
+ 
+ export async function prepare(_repoDir: string, _env: WorkerEnv): Promise<void> {

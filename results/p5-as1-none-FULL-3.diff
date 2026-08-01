@@ -1,0 +1,84 @@
+diff --git a/packages/core/src/writing/__tests__/writing.test.ts b/packages/core/src/writing/__tests__/writing.test.ts
+index f2bc211..76f5922 100644
+--- a/packages/core/src/writing/__tests__/writing.test.ts
++++ b/packages/core/src/writing/__tests__/writing.test.ts
+@@ -275,6 +275,53 @@ describe('validateWordCount', () => {
+     expect(result.wordCount).toBe(0);
+     expect(result.valid).toBe(true);
+   });
++
++  // Legacy mode (default) tests
++  it('legacy mode treats pure numbers as words', () => {
++    const result = validateWordCount('hello 123 world', { min: 1, max: 10 });
++    expect(result.wordCount).toBe(3);
++  });
++
++  it('legacy mode does not treat em-dashes as word separators', () => {
++    const result = validateWordCount('fire—and—forget', { min: 1, max: 10 });
++    expect(result.wordCount).toBe(1);
++  });
++
++  // Strict mode tests
++  it('strict mode treats em-dashes as word separators', () => {
++    const result = validateWordCount('fire—and—forget', { min: 1, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(3);
++  });
++
++  it('strict mode excludes pure-number tokens', () => {
++    const result = validateWordCount('hello 123 world', { min: 1, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(2);
++  });
++
++  it('strict mode handles decimal numbers', () => {
++    const result = validateWordCount('pi is 3.14 approximately', { min: 1, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(3);
++  });
++
++  it('strict mode handles comma-separated numbers', () => {
++    const result = validateWordCount('costs 1,000 dollars', { min: 1, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(2);
++  });
++
++  it('strict mode counts mixed alphanumeric tokens', () => {
++    const result = validateWordCount('v2 and 3rd are included', { min: 1, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(5);
++  });
++
++  it('strict mode preserves hyphenated compounds as single word', () => {
++    const result = validateWordCount('state-of-the-art technology', { min: 1, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(2);
++  });
++
++  it('strict mode with multiple em-dashes', () => {
++    const result = validateWordCount('a———b', { min: 1, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(2);
++  });
+ });
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/packages/core/src/writing/word-count.ts b/packages/core/src/writing/word-count.ts
+index e81be9e..04e3a49 100644
+--- a/packages/core/src/writing/word-count.ts
++++ b/packages/core/src/writing/word-count.ts
+@@ -21,9 +21,20 @@ function stripMarkdown(text: string): string {
+ export function validateWordCount(
+   text: string,
+   target: { min: number; max: number },
++  opts?: { mode?: 'legacy' | 'strict' },
+ ): { valid: boolean; wordCount: number; deviation: number } {
+   const stripped = stripMarkdown(text);
+-  const words = stripped.split(/\s+/).filter((w) => w.length > 0);
++  const mode = opts?.mode ?? 'legacy';
++
++  let words = stripped.split(/\s+/).filter((w) => w.length > 0);
++
++  if (mode === 'strict') {
++    // Treat em-dashes as word separators
++    words = words.flatMap((word) => word.split(/—+/).filter((w) => w.length > 0));
++    // Exclude pure-number tokens
++    words = words.filter((word) => !/^\d+([.,]\d+)*$/.test(word));
++  }
++
+   const wordCount = words.length;
+ 
+   let deviation = 0;

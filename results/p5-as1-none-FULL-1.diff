@@ -1,0 +1,102 @@
+diff --git a/packages/core/src/writing/__tests__/writing.test.ts b/packages/core/src/writing/__tests__/writing.test.ts
+index f2bc211..d3269e9 100644
+--- a/packages/core/src/writing/__tests__/writing.test.ts
++++ b/packages/core/src/writing/__tests__/writing.test.ts
+@@ -275,6 +275,68 @@ describe('validateWordCount', () => {
+     expect(result.wordCount).toBe(0);
+     expect(result.valid).toBe(true);
+   });
++
++  describe('strict mode', () => {
++    it('defaults to legacy mode when opts is omitted', () => {
++      const text = 'fire—and—forget';
++      const resultNoOpts = validateWordCount(text, { min: 0, max: 10 });
++      const resultLegacy = validateWordCount(text, { min: 0, max: 10 }, { mode: 'legacy' });
++      expect(resultNoOpts.wordCount).toBe(resultLegacy.wordCount);
++      expect(resultNoOpts.wordCount).toBe(1);
++    });
++
++    it('treats em-dashes as word separators in strict mode', () => {
++      const text = 'fire—and—forget';
++      const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++      expect(result.wordCount).toBe(3);
++    });
++
++    it('excludes pure-number tokens in strict mode', () => {
++      const text = 'I have 3 apples and 5 oranges';
++      const resultLegacy = validateWordCount(text, { min: 0, max: 20 }, { mode: 'legacy' });
++      const resultStrict = validateWordCount(text, { min: 0, max: 20 }, { mode: 'strict' });
++      expect(resultLegacy.wordCount).toBe(7);
++      expect(resultStrict.wordCount).toBe(5);
++    });
++
++    it('excludes decimal numbers in strict mode', () => {
++      const text = 'The value is 3.14 and 1.5';
++      const resultLegacy = validateWordCount(text, { min: 0, max: 20 }, { mode: 'legacy' });
++      const resultStrict = validateWordCount(text, { min: 0, max: 20 }, { mode: 'strict' });
++      expect(resultLegacy.wordCount).toBe(6);
++      expect(resultStrict.wordCount).toBe(4);
++    });
++
++    it('excludes comma-separated numbers in strict mode', () => {
++      const text = 'It costs 1,000 dollars and 2,500 cents';
++      const resultLegacy = validateWordCount(text, { min: 0, max: 20 }, { mode: 'legacy' });
++      const resultStrict = validateWordCount(text, { min: 0, max: 20 }, { mode: 'strict' });
++      expect(resultLegacy.wordCount).toBe(7);
++      expect(resultStrict.wordCount).toBe(5);
++    });
++
++    it('counts hyphenated compounds as one word in strict mode', () => {
++      const text = 'state-of-the-art design';
++      const resultStrict = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++      expect(resultStrict.wordCount).toBe(2);
++    });
++
++    it('counts alphanumeric tokens like 3rd and v2 in strict mode', () => {
++      const text = 'The 3rd version and v2 release';
++      const resultLegacy = validateWordCount(text, { min: 0, max: 20 }, { mode: 'legacy' });
++      const resultStrict = validateWordCount(text, { min: 0, max: 20 }, { mode: 'strict' });
++      expect(resultLegacy.wordCount).toBe(6);
++      expect(resultStrict.wordCount).toBe(6);
++    });
++
++    it('combines em-dash splitting and number exclusion in strict mode', () => {
++      const text = 'Chapter 1—with 5 scenes—and 3.14 length';
++      const resultStrict = validateWordCount(text, { min: 0, max: 20 }, { mode: 'strict' });
++      // "Chapter" / "with" / "scenes" / "and" / "length" = 5 words
++      // (em-dashes split, numbers excluded)
++      expect(resultStrict.wordCount).toBe(5);
++    });
++  });
+ });
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/packages/core/src/writing/word-count.ts b/packages/core/src/writing/word-count.ts
+index e81be9e..e9857b8 100644
+--- a/packages/core/src/writing/word-count.ts
++++ b/packages/core/src/writing/word-count.ts
+@@ -21,9 +21,23 @@ function stripMarkdown(text: string): string {
+ export function validateWordCount(
+   text: string,
+   target: { min: number; max: number },
++  opts?: { mode?: 'legacy' | 'strict' },
+ ): { valid: boolean; wordCount: number; deviation: number } {
++  const mode = opts?.mode ?? 'legacy';
+   const stripped = stripMarkdown(text);
+-  const words = stripped.split(/\s+/).filter((w) => w.length > 0);
++
++  let words: string[];
++  if (mode === 'strict') {
++    // In strict mode, em-dashes are treated as word separators
++    const withDashSeparators = stripped.replace(/—/g, ' ');
++    words = withDashSeparators.split(/\s+/).filter((w) => w.length > 0);
++    // Exclude pure-number tokens (e.g., "3", "3.14", "1,000")
++    words = words.filter((w) => !/^\d+([.,]\d+)*$/.test(w));
++  } else {
++    // Legacy mode: original behavior
++    words = stripped.split(/\s+/).filter((w) => w.length > 0);
++  }
++
+   const wordCount = words.length;
+ 
+   let deviation = 0;

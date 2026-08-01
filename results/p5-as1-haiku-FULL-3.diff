@@ -1,0 +1,144 @@
+diff --git a/packages/core/src/writing/__tests__/writing.test.ts b/packages/core/src/writing/__tests__/writing.test.ts
+index f2bc211..88cbbf3 100644
+--- a/packages/core/src/writing/__tests__/writing.test.ts
++++ b/packages/core/src/writing/__tests__/writing.test.ts
+@@ -277,6 +277,93 @@ describe('validateWordCount', () => {
+   });
+ });
+ 
++// ---------------------------------------------------------------------------
++// validateWordCount — strict mode
++// ---------------------------------------------------------------------------
++
++describe('validateWordCount — strict mode', () => {
++  it('treats em-dashes as word separators in strict mode', () => {
++    const text = 'fire—and—forget';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(3);
++    expect(result.valid).toBe(true);
++  });
++
++  it('treats em-dashes as non-separators in legacy mode (default)', () => {
++    const text = 'fire—and—forget';
++    const result = validateWordCount(text, { min: 0, max: 10 });
++    expect(result.wordCount).toBe(1);
++    expect(result.valid).toBe(true);
++  });
++
++  it('excludes pure-number tokens in strict mode', () => {
++    const text = 'I have 3 apples and 2.5 oranges';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // Words: I, have, apples, and, oranges = 5 (3 and 2.5 excluded as pure numbers)
++    expect(result.wordCount).toBe(5);
++  });
++
++  it('counts comma-separated numbers as pure numbers in strict mode', () => {
++    const text = 'population is 1,000 people';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // Words: population, is, people = 3 (1,000 excluded)
++    expect(result.wordCount).toBe(3);
++  });
++
++  it('counts mixed alphanumeric tokens in strict mode', () => {
++    const text = 'Version 3.0 and v2 patches';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // Words: Version, and, v2, patches = 4 (3.0 is pure number, excluded)
++    expect(result.wordCount).toBe(4);
++  });
++
++  it('counts tokens starting with letters followed by numbers in strict mode', () => {
++    const text = 'version3 and 3rd edition';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // Words: version3, and, 3rd, edition = 4 (3 is pure number, excluded)
++    expect(result.wordCount).toBe(4);
++  });
++
++  it('keeps hyphenated compounds as one word in strict mode', () => {
++    const text = 'state-of-the-art solution';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // Words: state-of-the-art, solution = 2
++    expect(result.wordCount).toBe(2);
++  });
++
++  it('separates on both whitespace and em-dashes in strict mode', () => {
++    const text = 'word1 — word2—word3';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // Words: word1, word2, word3 = 3
++    expect(result.wordCount).toBe(3);
++  });
++
++  it('strips markdown and applies strict mode filtering', () => {
++    const text = '**3** words here';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // After markdown: 3 words here → pure number 3 excluded → 2 words
++    expect(result.wordCount).toBe(2);
++  });
++
++  it('maintains valid/deviation semantics in strict mode', () => {
++    const text = 'I have 3 apples';
++    const result = validateWordCount(text, { min: 2, max: 5 }, { mode: 'strict' });
++    // Words: I, have, apples = 3 (3 is excluded)
++    expect(result.wordCount).toBe(3);
++    expect(result.valid).toBe(true);
++    expect(result.deviation).toBe(0);
++  });
++
++  it('returns deviation when strict mode count exceeds maximum', () => {
++    const text = 'I have 3 apples and 2 oranges and 1 pear';
++    const result = validateWordCount(text, { min: 1, max: 5 }, { mode: 'strict' });
++    // Words: I, have, apples, and, oranges, and, pear = 7 (3, 2, 1 excluded)
++    expect(result.wordCount).toBe(7);
++    expect(result.valid).toBe(false);
++    expect(result.deviation).toBe(2);
++  });
++});
++
+ // ---------------------------------------------------------------------------
+ // parseChapterMarkdown
+ // ---------------------------------------------------------------------------
+diff --git a/packages/core/src/writing/index.ts b/packages/core/src/writing/index.ts
+index 66d55bd..448bb22 100644
+--- a/packages/core/src/writing/index.ts
++++ b/packages/core/src/writing/index.ts
+@@ -11,6 +11,7 @@ export type {
+ 
+ export { mergeContinuityState, pruneContinuityState } from './continuity.js';
+ export { validateWordCount } from './word-count.js';
++export type { ValidateWordCountOpts } from './word-count.js';
+ export type { ParsedChapter } from './markdown.js';
+ export { parseChapterMarkdown, assembleManuscript } from './markdown.js';
+ export { checkStyleConsistency } from './style.js';
+diff --git a/packages/core/src/writing/word-count.ts b/packages/core/src/writing/word-count.ts
+index e81be9e..0623105 100644
+--- a/packages/core/src/writing/word-count.ts
++++ b/packages/core/src/writing/word-count.ts
+@@ -18,12 +18,28 @@ function stripMarkdown(text: string): string {
+   );
+ }
+ 
++type WordCountMode = 'legacy' | 'strict';
++
++export interface ValidateWordCountOpts {
++  mode?: WordCountMode;
++}
++
+ export function validateWordCount(
+   text: string,
+   target: { min: number; max: number },
++  opts?: ValidateWordCountOpts,
+ ): { valid: boolean; wordCount: number; deviation: number } {
+   const stripped = stripMarkdown(text);
+-  const words = stripped.split(/\s+/).filter((w) => w.length > 0);
++  const mode = opts?.mode ?? 'legacy';
++
++  let words: string[];
++  if (mode === 'strict') {
++    const withSpaces = stripped.replace(/—/g, ' ');
++    words = withSpaces.split(/\s+/).filter((w) => w.length > 0 && !/^\d+([.,]\d+)*$/.test(w));
++  } else {
++    words = stripped.split(/\s+/).filter((w) => w.length > 0);
++  }
++
+   const wordCount = words.length;
+ 
+   let deviation = 0;

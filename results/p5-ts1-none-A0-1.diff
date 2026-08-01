@@ -1,0 +1,158 @@
+diff --git a/packages/core/src/queue/work-items.ts b/packages/core/src/queue/work-items.ts
+index c41c9d7..b602290 100644
+--- a/packages/core/src/queue/work-items.ts
++++ b/packages/core/src/queue/work-items.ts
+@@ -81,6 +81,11 @@ const QuickTaskSchema = WorkItemBaseSchema.extend({
+   issueBody: z.string(),
+ });
+ 
++const CancelRunSchema = WorkItemBaseSchema.extend({
++  type: z.literal('CANCEL_RUN'),
++  issueNumber: z.number().int(),
++});
++
+ export const WorkItemSchema = z.discriminatedUnion('type', [
+   BootstrapProjectSchema,
+   BootstrapRepoSchema,
+@@ -96,6 +101,7 @@ export const WorkItemSchema = z.discriminatedUnion('type', [
+   ReconcileSchema,
+   EnrichIssueSchema,
+   QuickTaskSchema,
++  CancelRunSchema,
+ ]);
+ 
+ export type WorkItemBase = z.infer<typeof WorkItemBaseSchema>;
+@@ -115,3 +121,4 @@ export type UpdateStatusWorkItem = z.infer<typeof UpdateStatusSchema>;
+ export type ReconcileWorkItem = z.infer<typeof ReconcileSchema>;
+ export type EnrichIssueWorkItem = z.infer<typeof EnrichIssueSchema>;
+ export type QuickTaskWorkItem = z.infer<typeof QuickTaskSchema>;
++export type CancelRunWorkItem = z.infer<typeof CancelRunSchema>;
+diff --git a/packages/lambdas/__tests__/webhook-handler.test.ts b/packages/lambdas/__tests__/webhook-handler.test.ts
+index 33979c6..4a8e57a 100644
+--- a/packages/lambdas/__tests__/webhook-handler.test.ts
++++ b/packages/lambdas/__tests__/webhook-handler.test.ts
+@@ -511,6 +511,87 @@ describe('webhook-handler', () => {
+     });
+   });
+ 
++  // -------------------------------------------------------------------------
++  // issue_comment /cancel → CANCEL_RUN (or ignore for PR comments)
++  // -------------------------------------------------------------------------
++  describe('issue_comment /cancel → CANCEL_RUN', () => {
++    it('enqueues CANCEL_RUN work item for issue comment', async () => {
++      const body = JSON.stringify({
++        action: 'created',
++        comment: { body: '/cancel' },
++        issue: { number: 42, body: '' },
++        repository: {
++          full_name: 'acme/myapp',
++          name: 'myapp',
++          owner: { login: 'acme' },
++        },
++      });
++      const event = makeWebhookEvent({ githubEvent: 'issue_comment', body });
++      const result = await handler(event);
++
++      expect(result).toMatchObject({ statusCode: 202 });
++      const parsed = JSON.parse((result as { body: string }).body);
++      expect(parsed.status).toBe('cancel-requested');
++      expect(parsed.issueNumber).toBe(42);
++
++      const cmd = mockSqsSend.mock.calls[0][0] as {
++        input: { Entries: Array<{ MessageBody: string }> };
++      };
++      const workItem = JSON.parse(cmd.input.Entries[0].MessageBody);
++      expect(workItem.type).toBe('CANCEL_RUN');
++      expect(workItem.issueNumber).toBe(42);
++      expect(workItem.repoFullName).toBe('acme/myapp');
++      expect(workItem.projectId).toBe('test-uuid');
++      expect(workItem.correlationId).toBe('test-uuid');
++    });
++
++    it('ignores /cancel command on pull request comments', async () => {
++      const body = JSON.stringify({
++        action: 'created',
++        comment: { body: '/cancel' },
++        issue: {
++          number: 25,
++          body: '',
++          pull_request: { url: 'https://api.github.com/repos/acme/myapp/pulls/25' },
++        },
++        repository: {
++          full_name: 'acme/myapp',
++          name: 'myapp',
++          owner: { login: 'acme' },
++        },
++      });
++      const event = makeWebhookEvent({ githubEvent: 'issue_comment', body });
++      const result = await handler(event);
++
++      expect(result).toMatchObject({ statusCode: 200 });
++      const parsed = JSON.parse((result as { body: string }).body);
++      expect(parsed.status).toBe('ignored');
++      expect(parsed.reason).toBe('pr comment');
++
++      expect(mockSqsSend).not.toHaveBeenCalled();
++    });
++
++    it('enqueues CANCEL_RUN for /cancel with extra text', async () => {
++      const body = JSON.stringify({
++        action: 'created',
++        comment: { body: '/cancel this run' },
++        issue: { number: 99, body: '' },
++        repository: {
++          full_name: 'acme/myapp',
++          name: 'myapp',
++          owner: { login: 'acme' },
++        },
++      });
++      const event = makeWebhookEvent({ githubEvent: 'issue_comment', body });
++      const result = await handler(event);
++
++      expect(result).toMatchObject({ statusCode: 202 });
++      const parsed = JSON.parse((result as { body: string }).body);
++      expect(parsed.status).toBe('cancel-requested');
++      expect(parsed.issueNumber).toBe(99);
++    });
++  });
++
+   // -------------------------------------------------------------------------
+   // Malformed payloads
+   // -------------------------------------------------------------------------
+diff --git a/packages/lambdas/src/handlers/webhook-handler.ts b/packages/lambdas/src/handlers/webhook-handler.ts
+index 74b5e1a..d606f27 100644
+--- a/packages/lambdas/src/handlers/webhook-handler.ts
++++ b/packages/lambdas/src/handlers/webhook-handler.ts
+@@ -222,6 +222,32 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
+       return respond(200, { enqueued: true, type: 'TRIGGER_TASK', correlationId });
+     }
+ 
++    if (commentBody.startsWith('/cancel')) {
++      const hasPullRequest = 'pull_request' in issue;
++
++      if (hasPullRequest) {
++        return respond(200, { status: 'ignored', reason: 'pr comment' });
++      }
++
++      const correlationId = uuidv4();
++      const projectId = uuidv4();
++
++      await enqueueWorkItems(
++        [
++          {
++            type: 'CANCEL_RUN',
++            projectId,
++            repoFullName,
++            correlationId,
++            issueNumber,
++          },
++        ],
++        sqsClient,
++      );
++
++      return respond(202, { status: 'cancel-requested', issueNumber });
++    }
++
+     return respond(200, { ignored: true });
+   }
+ 

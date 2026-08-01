@@ -1,0 +1,65 @@
+diff --git a/packages/core/src/queue/work-items.ts b/packages/core/src/queue/work-items.ts
+index c41c9d7..b602290 100644
+--- a/packages/core/src/queue/work-items.ts
++++ b/packages/core/src/queue/work-items.ts
+@@ -81,6 +81,11 @@ const QuickTaskSchema = WorkItemBaseSchema.extend({
+   issueBody: z.string(),
+ });
+ 
++const CancelRunSchema = WorkItemBaseSchema.extend({
++  type: z.literal('CANCEL_RUN'),
++  issueNumber: z.number().int(),
++});
++
+ export const WorkItemSchema = z.discriminatedUnion('type', [
+   BootstrapProjectSchema,
+   BootstrapRepoSchema,
+@@ -96,6 +101,7 @@ export const WorkItemSchema = z.discriminatedUnion('type', [
+   ReconcileSchema,
+   EnrichIssueSchema,
+   QuickTaskSchema,
++  CancelRunSchema,
+ ]);
+ 
+ export type WorkItemBase = z.infer<typeof WorkItemBaseSchema>;
+@@ -115,3 +121,4 @@ export type UpdateStatusWorkItem = z.infer<typeof UpdateStatusSchema>;
+ export type ReconcileWorkItem = z.infer<typeof ReconcileSchema>;
+ export type EnrichIssueWorkItem = z.infer<typeof EnrichIssueSchema>;
+ export type QuickTaskWorkItem = z.infer<typeof QuickTaskSchema>;
++export type CancelRunWorkItem = z.infer<typeof CancelRunSchema>;
+diff --git a/packages/lambdas/src/handlers/webhook-handler.ts b/packages/lambdas/src/handlers/webhook-handler.ts
+index 74b5e1a..b33f3c4 100644
+--- a/packages/lambdas/src/handlers/webhook-handler.ts
++++ b/packages/lambdas/src/handlers/webhook-handler.ts
+@@ -222,6 +222,31 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
+       return respond(200, { enqueued: true, type: 'TRIGGER_TASK', correlationId });
+     }
+ 
++    if (commentBody.startsWith('/cancel')) {
++      const pullRequest = issue['pull_request'];
++      if (pullRequest !== undefined) {
++        return respond(200, { status: 'ignored', reason: 'pr comment' });
++      }
++
++      const correlationId = uuidv4();
++      const projectId = uuidv4();
++
++      await enqueueWorkItems(
++        [
++          {
++            type: 'CANCEL_RUN',
++            projectId,
++            repoFullName,
++            correlationId,
++            issueNumber,
++          },
++        ],
++        sqsClient,
++      );
++
++      return respond(202, { status: 'cancel-requested', issueNumber });
++    }
++
+     return respond(200, { ignored: true });
+   }
+ 

@@ -1,0 +1,29 @@
+diff --git a/packages/core/src/dynamodb/repo-locks.ts b/packages/core/src/dynamodb/repo-locks.ts
+index e591d53..e873ef6 100644
+--- a/packages/core/src/dynamodb/repo-locks.ts
++++ b/packages/core/src/dynamodb/repo-locks.ts
+@@ -16,9 +16,14 @@ export class RepoLocksService {
+     this.tableName = getConfig().DYNAMODB_TABLE_REPO_LOCKS;
+   }
+ 
+-  async acquireLock(repoFullName: string, lockOwner: string): Promise<void> {
++  async acquireLock(
++    repoFullName: string,
++    lockOwner: string,
++    opts?: { takeoverGraceSeconds?: number },
++  ): Promise<void> {
+     const config = getConfig();
+     const now = Math.floor(Date.now() / 1000);
++    const takeoverGraceSeconds = opts?.takeoverGraceSeconds ?? 30;
+     const ttl = now + config.REPO_LOCK_TTL_SECONDS;
+ 
+     const item: RepoLock = {
+@@ -35,7 +40,7 @@ export class RepoLocksService {
+           Item: item,
+           ConditionExpression: 'attribute_not_exists(repoFullName) OR #ttl < :now',
+           ExpressionAttributeNames: { '#ttl': 'ttl' },
+-          ExpressionAttributeValues: { ':now': now },
++          ExpressionAttributeValues: { ':now': now - takeoverGraceSeconds },
+         }),
+       );
+     } catch (err) {

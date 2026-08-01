@@ -16,6 +16,8 @@ So I tried to measure the same layers under controlled conditions: same model, s
 
 The interesting conclusion is the tension between those two facts: **harness ROI is a function of horizon, not a constant.** Below some task-length/autonomy threshold, frontier models don't need the scaffolding. Production fleets operate far above that threshold, where the same scaffolding blocks failures continuously. Benchmarks that grade harnesses on short tasks are measuring the flat part of the curve.
 
+**Pilot 5 replicated it at n=3 on two repos — and found the sharp edge of planning.** Across 72 runs on 6 new tasks, only one configuration went perfect: **plan + full harness, 18/18**. Bare-with-plan went 14/18, *below* bare-without-plan (16/18), and the autopsy explains why: a plan substitutes for exploration, so when its consistency sweep is incomplete, the executor stops at the checklist instead of discovering the gap. No comparison reaches p<0.05 — see § Pilot 5 for why that honest caveat matters more than the point estimates.
+
 **Pilot 4 then split the harness's value in two.** Giving the same failing executor a written implementation plan — authored by *any* tier, including haiku planning for itself — fixed the spec-misreading failures completely (planned haiku: 17/18 bare vs 1/3 unplanned), but the one failure that survived was the follow-through relapse, and only the enforcement loop closed it reliably. **Plan for the *what*, harness for the *whether*.**
 
 **Pilot 3 found the onset.** At hour-scale, cross-cutting feature builds (a new worker mode wired through five layers; a 17-file refactor; a webhook flow), the top-tier model still didn't need the harness — but the small model did, decisively: **haiku went 1/3 bare and 3/3 with the full harness**, matching sonnet's outcomes at roughly a third of the cost (n=1 per cell; § Pilot 3). The harness acted as a model-tier equalizer exactly where horizon got long.
@@ -127,6 +129,27 @@ Hypothesis under test (raised after pilot 3): *frontier models are only needed t
 
 **10. The cheapest reliable stack observed has no frontier model in it:** haiku-plan → haiku executor → deterministic gates + reviewer. ~$0.85/task all-in at hour scale, matching sonnet's outcomes on this task set.
 
+---
+
+## Pilot 5 — powered replication, two repos, and the sharp edge of planning
+
+Pilots 3–4 ran n≤2 on three tasks in one repo. Pilot 5 is the replication: **6 new calibrated tasks across two repos** (telos and [auto-graph](https://github.com/tdrml/auto-graph), a 79K-LOC pipeline pinned at `494194d`), a clean 2×2 of **planning × enforcement**, executor haiku throughout, **n=3** — 72 runs, $63.60 including all six plans ($0.84 total; haiku planned the whole corpus for under a dollar).
+
+Tasks split evenly into two classes. **Breadth**: inject table names into 5 service constructors and migrate every site (tb1); convert `enqueue` to a params object across ~34 call sites (ab1); add a required `locations` field to `ContinuityState` and update every constructor of it (ab2). **Spec**: a `/cancel` webhook command with exact 202/200 responses (ts1); a lock-takeover grace period with exact `:now = epoch − grace` arithmetic (ts2); a strict word-count mode with adversarial tokenization vectors (as1).
+
+| haiku executor | A0 | FULL |
+|---|---|---|
+| no plan | 16/18 (89%) | 17/18 (94%) |
+| haiku-plan | 14/18 (78%) | **18/18 (100%)** |
+
+**11. The honest statistics: nothing here reaches significance.** Two-sided Fisher exact: FULL vs A0 overall p=0.107; plan+FULL vs plan+A0 p=0.104; breadth-only FULL vs A0 p=0.088; plan vs no-plan at A0 p=0.658. Pilot 5 was designed to be the powered replication and **it is not**, for a reason worth publishing: **4 of the 6 tasks saturated at 100% in all four cells** (every spec-class task went 9/9 everywhere), so the effective sample is 2 tasks, not 6. My new spec-class tasks failed to reproduce the difficulty of pilot 4's spec task — the executor simply got them right, planned or not. Powering this design means task authoring that reliably lands in the 40–80% band, and that is harder than adding reps: task difficulty, not run-to-run variance, is the binding constraint on statistical power in agent benchmarks.
+
+**12. Planning substitutes for exploration — which is why an incomplete plan is worse than none.** All 7 failures in the study were breadth-class, from 2 of 6 tasks. The most informative is `tb1:haiku-plan:A0`, which failed twice where the unplanned arm went 3/3. The autopsy: **both arms made the identical production change** — module-scope `const config = getConfig()` in 14 handlers, table names passed to constructors. The difference was the ripple. Moving the config read out of the (test-mocked) service class and into the handler module crosses the mock boundary, so 19 handler test files now execute the real `getConfig()` at import time and die on unset env. **The unplanned run discovered this by running the suite and fixed 20 test files. The planned run fixed 1.** The plan's consistency sweep had eleven checkboxes and looked exhaustive — but enumerated only the core package's test instantiations and never mentioned the handler tests. The executor treated the checklist as the definition of done. A plan is an authority claim about what completeness means; when it is wrong, it is wrong *confidently*, and it displaces the search that would have caught it.
+
+**13. Enforcement is what makes planning safe.** The same task, same plan, with the harness: 3/3. The done-gate does not care what the plan enumerated — it re-runs the suite and blocks the stop, so the blind spot surfaces anyway. This is the first pilot where the deterministic gate visibly fired in production conditions: **6 of 36 FULL runs hit at least one block (14 blocks total), and 3 runs saturated the 3-block bound**; the reviewer returned REQUEST_CHANGES on 10 of 36 and every one of those triggered a revision round. The gate-block rate here (17% of harnessed runs) is the same order as the 28.8% measured on multi-hour production runs, from a clean-room reimplementation of the same idea. Cost of the reliable configuration: **$1.12 per success (plan+FULL) versus $0.83 per success for bare** — a 35% premium for the difference between 89% and 100%, with no frontier model anywhere in the loop. Planning also paid for itself in tokens: planned runs were *cheaper* per run than unplanned ones at both arms ($0.62 vs $0.74 at A0), because the executor spent less time exploring.
+
+*Residual instrument note:* 2 of 36 reviewer verdicts were still `UNPARSEABLE` despite the salvage retry added after Finding 7 — a reminder that inter-agent contracts degrade rather than fail cleanly. Both affected runs passed on their own merits.
+
 *Pilot 3 incident note:* the first L1:sonnet:FULL attempt exhausted the 16 GB host VM (12-worker vitest pool × CDK synth under a concurrent headless agent; no OOM-kill, full thrash). Reruns were memory-capped (worker pools + cgroup MemoryMax). The benchmark's own infrastructure OOM'ing the host is, fittingly, an operational-reality datum.
 
 ---
@@ -143,9 +166,10 @@ The variable that changed is **horizon**: minutes vs hours, one objective vs a t
 
 ## Threats to validity
 
-- **n = 1 per cell.** These pilots calibrate difficulty and validate mechanics; they are not powered for small effects. The null here is "no separation visible at n=1 with 100% ceiling," which is a statement about task difficulty, not a precise effect estimate.
+- **Underpowered, and pilot 5 says so explicitly.** Pilots 1–4 ran n≤2 per cell. Pilot 5 ran n=3 across 6 tasks and still reached no p<0.05, because 4 tasks saturated at 100% (§ Finding 11). Every effect claimed here is a direction plus a mechanism, not an interval. The mechanisms (§ Findings 12–13) rest on diff-level autopsies, which is the strongest evidence in this study — stronger than its proportions.
 - **One author wrote the tasks, the holdouts, and the harness.** Pre-registration and published raw journals mitigate; they don't eliminate.
-- **Contamination:** the target repo was private during all graded runs and published afterward; task briefs are synthetic; model training cutoffs predate the repo's existence in public form.
+- **Contamination:** both target repos were private during all graded runs and published afterward; task briefs are synthetic; model training cutoffs predate the repos' existence in public form.
+- **Two repos, both mine, both TypeScript/vitest monorepos.** Cross-repo consistency (telos 34/36, auto-graph 31/36) is reassuring but not external validity.
 - **The production numbers are observational**, from one platform, and not independently auditable in this repo (the platform is company-owned). They motivate the horizon hypothesis; they don't prove it.
 - The reviewer/harness implementations are minimal clean-room versions of the production patterns, not the production code.
 
@@ -160,6 +184,8 @@ node runner/run-pilot.mjs    # pilot 1 (15 runs, ~$4)
 node runner/run-pilot2.mjs   # pilot 2 (40 runs, ~$12)
 node runner/run-pilot3.mjs   # pilot 3 (12 hour-scale runs, ~$24)
 node runner/run-pilot4.mjs   # pilot 4 (24 planning-ablation runs, ~$30)
+git clone https://github.com/tdrml/auto-graph .pristine-autograph   # second target (pilot 5)
+node runner/run-pilot5.mjs   # pilot 5 (72 runs, two repos, ~$64)
 ```
 
 Runners are sequential, resumable (JSONL journal is the source of truth), and kill-switched on summed API-equivalent cost.

@@ -1,0 +1,151 @@
+diff --git a/packages/core/src/writing/__tests__/writing.test.ts b/packages/core/src/writing/__tests__/writing.test.ts
+index f2bc211..b7ccb00 100644
+--- a/packages/core/src/writing/__tests__/writing.test.ts
++++ b/packages/core/src/writing/__tests__/writing.test.ts
+@@ -277,6 +277,94 @@ describe('validateWordCount', () => {
+   });
+ });
+ 
++describe('validateWordCount — strict mode', () => {
++  it('treats em-dashes as word separators in strict mode', () => {
++    const text = 'fire—and—forget';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(3);
++    expect(result.valid).toBe(true);
++  });
++
++  it('excludes pure-number tokens from count in strict mode', () => {
++    const text = 'I have 3 apples and 2.5 oranges';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // I, have, apples, and, oranges = 5 words (3 and 2.5 are pure numbers and filtered out)
++    expect(result.wordCount).toBe(5);
++    expect(result.valid).toBe(true);
++  });
++
++  it('counts mixed alphanumeric tokens in strict mode', () => {
++    const text = 'Version 3.0 and v2 patches';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // Version, 3.0 (excluded), and, v2, patches = 4 words
++    expect(result.wordCount).toBe(4);
++    expect(result.valid).toBe(true);
++  });
++
++  it('treats hyphenated compounds as one word in strict mode', () => {
++    const text = 'state-of-the-art solution';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(2);
++    expect(result.valid).toBe(true);
++  });
++
++  it('treats both whitespace and em-dashes as separators in strict mode', () => {
++    const text = 'word1 — word2—word3';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(3);
++    expect(result.valid).toBe(true);
++  });
++
++  it('strips markdown in strict mode and applies strict rules', () => {
++    const text = '**3** words here';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // After markdown stripping: "3 words here"
++    // 3 is pure number (excluded), words, here = 2 words
++    expect(result.wordCount).toBe(2);
++    expect(result.valid).toBe(true);
++  });
++
++  it('maintains backward compatibility - legacy mode is default', () => {
++    const text = 'fire—and—forget';
++    const result = validateWordCount(text, { min: 0, max: 10 });
++    // Em-dashes not separators in legacy mode
++    expect(result.wordCount).toBe(1);
++    expect(result.valid).toBe(true);
++  });
++
++  it('explicitly calls legacy mode', () => {
++    const text = 'fire—and—forget';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'legacy' });
++    expect(result.wordCount).toBe(1);
++    expect(result.valid).toBe(true);
++  });
++
++  it('counts numbers with thousands separators as pure numbers', () => {
++    const text = 'The total is 1,000 items';
++    const result = validateWordCount(text, { min: 0, max: 10 }, { mode: 'strict' });
++    // The, total, is, 1,000 (excluded), items = 4 words
++    expect(result.wordCount).toBe(4);
++    expect(result.valid).toBe(true);
++  });
++
++  it('maintains valid and deviation semantics in strict mode', () => {
++    const text = 'one two three—four—five';
++    const result = validateWordCount(text, { min: 0, max: 3 }, { mode: 'strict' });
++    // one, two, three, four, five = 5 words in strict mode
++    expect(result.wordCount).toBe(5);
++    expect(result.valid).toBe(false);
++    expect(result.deviation).toBe(2);
++  });
++
++  it('returns negative deviation when under minimum in strict mode', () => {
++    const text = 'too short';
++    const result = validateWordCount(text, { min: 10, max: 20 }, { mode: 'strict' });
++    expect(result.wordCount).toBe(2);
++    expect(result.valid).toBe(false);
++    expect(result.deviation).toBe(-8);
++  });
++});
++
+ // ---------------------------------------------------------------------------
+ // parseChapterMarkdown
+ // ---------------------------------------------------------------------------
+diff --git a/packages/core/src/writing/index.ts b/packages/core/src/writing/index.ts
+index 66d55bd..448bb22 100644
+--- a/packages/core/src/writing/index.ts
++++ b/packages/core/src/writing/index.ts
+@@ -11,6 +11,7 @@ export type {
+ 
+ export { mergeContinuityState, pruneContinuityState } from './continuity.js';
+ export { validateWordCount } from './word-count.js';
++export type { ValidateWordCountOpts } from './word-count.js';
+ export type { ParsedChapter } from './markdown.js';
+ export { parseChapterMarkdown, assembleManuscript } from './markdown.js';
+ export { checkStyleConsistency } from './style.js';
+diff --git a/packages/core/src/writing/word-count.ts b/packages/core/src/writing/word-count.ts
+index e81be9e..fd5312e 100644
+--- a/packages/core/src/writing/word-count.ts
++++ b/packages/core/src/writing/word-count.ts
+@@ -1,3 +1,9 @@
++type WordCountMode = 'legacy' | 'strict';
++
++export interface ValidateWordCountOpts {
++  mode?: WordCountMode;
++}
++
+ function stripMarkdown(text: string): string {
+   return (
+     text
+@@ -21,9 +27,24 @@ function stripMarkdown(text: string): string {
+ export function validateWordCount(
+   text: string,
+   target: { min: number; max: number },
++  opts?: ValidateWordCountOpts,
+ ): { valid: boolean; wordCount: number; deviation: number } {
+   const stripped = stripMarkdown(text);
+-  const words = stripped.split(/\s+/).filter((w) => w.length > 0);
++  const mode = opts?.mode ?? 'legacy';
++
++  let words: string[];
++
++  if (mode === 'strict') {
++    // In strict mode: replace em-dashes with spaces, then split and filter
++    const withSpaces = stripped.replace(/—/g, ' ');
++    const splitWords = withSpaces.split(/\s+/).filter((w) => w.length > 0);
++    // Filter out pure-number tokens
++    words = splitWords.filter((w) => !/^\d+([.,]\d+)*$/.test(w));
++  } else {
++    // Legacy mode: original behavior
++    words = stripped.split(/\s+/).filter((w) => w.length > 0);
++  }
++
+   const wordCount = words.length;
+ 
+   let deviation = 0;

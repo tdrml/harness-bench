@@ -1,0 +1,109 @@
+diff --git a/packages/core/__tests__/dynamodb.test.ts b/packages/core/__tests__/dynamodb.test.ts
+index 3699ca6..fb16670 100644
+--- a/packages/core/__tests__/dynamodb.test.ts
++++ b/packages/core/__tests__/dynamodb.test.ts
+@@ -560,4 +560,75 @@ describe('RepoLocksService', () => {
+     const result = await svc.isLocked('acme/app');
+     expect(result).toBe(false);
+   });
++
++  it('acquireLock uses default takeoverGraceSeconds of 30', async () => {
++    const client = makeClient(() => ({}));
++    const svc = new RepoLocksService(client);
++    const before = Math.floor(Date.now() / 1000);
++    await svc.acquireLock('acme/app', 'owner-1');
++    const after = Math.floor(Date.now() / 1000);
++    const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
++    const nowValue = cmd.input.ExpressionAttributeValues[':now'] as number;
++    expect(nowValue).toBeGreaterThanOrEqual(before - 30);
++    expect(nowValue).toBeLessThanOrEqual(after - 30);
++  });
++
++  it('acquireLock respects custom takeoverGraceSeconds', async () => {
++    const client = makeClient(() => ({}));
++    const svc = new RepoLocksService(client);
++    const before = Math.floor(Date.now() / 1000);
++    await svc.acquireLock('acme/app', 'owner-1', { takeoverGraceSeconds: 60 });
++    const after = Math.floor(Date.now() / 1000);
++    const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
++    const nowValue = cmd.input.ExpressionAttributeValues[':now'] as number;
++    expect(nowValue).toBeGreaterThanOrEqual(before - 60);
++    expect(nowValue).toBeLessThanOrEqual(after - 60);
++  });
++
++  it('acquireLock with takeoverGraceSeconds: 0 uses current time (original behavior)', async () => {
++    const client = makeClient(() => ({}));
++    const svc = new RepoLocksService(client);
++    const before = Math.floor(Date.now() / 1000);
++    await svc.acquireLock('acme/app', 'owner-1', { takeoverGraceSeconds: 0 });
++    const after = Math.floor(Date.now() / 1000);
++    const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
++    const nowValue = cmd.input.ExpressionAttributeValues[':now'] as number;
++    expect(nowValue).toBeGreaterThanOrEqual(before);
++    expect(nowValue).toBeLessThanOrEqual(after);
++  });
++
++  it('acquireLock with grace period prevents takeover during grace period', async () => {
++    const before = Math.floor(Date.now() / 1000);
++    const condErr = new ConditionalCheckFailedException({
++      message: 'The conditional request failed',
++      $metadata: {},
++    });
++    const client = makeClient(() => { throw condErr; });
++    const svc = new RepoLocksService(client);
++
++    // Attempt to acquire lock with 30-second grace period when a lock exists
++    // If lock hasn't been expired for at least 30 seconds, condition fails
++    await expect(
++      svc.acquireLock('acme/app', 'owner-2', { takeoverGraceSeconds: 30 }),
++    ).rejects.toBeInstanceOf(LockConflictError);
++
++    const after = Math.floor(Date.now() / 1000);
++    // Verify the condition expression uses grace-period-adjusted :now value
++    const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
++    const conditionNow = cmd.input.ExpressionAttributeValues[':now'] as number;
++    expect(conditionNow).toBeGreaterThanOrEqual(before - 30);
++    expect(conditionNow).toBeLessThanOrEqual(after - 30);
++  });
++
++  it('acquireLock does not modify new lock TTL by grace period', async () => {
++    const client = makeClient(() => ({}));
++    const svc = new RepoLocksService(client);
++    const before = Math.floor(Date.now() / 1000);
++    await svc.acquireLock('acme/app', 'owner-1', { takeoverGraceSeconds: 60 });
++    const after = Math.floor(Date.now() / 1000);
++    const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
++    const ttl = cmd.input.Item.ttl;
++    expect(ttl).toBeGreaterThanOrEqual(before + 1800);
++    expect(ttl).toBeLessThanOrEqual(after + 1800);
++  });
+ });
+diff --git a/packages/core/src/dynamodb/repo-locks.ts b/packages/core/src/dynamodb/repo-locks.ts
+index e591d53..e873ef6 100644
+--- a/packages/core/src/dynamodb/repo-locks.ts
++++ b/packages/core/src/dynamodb/repo-locks.ts
+@@ -16,9 +16,14 @@ export class RepoLocksService {
+     this.tableName = getConfig().DYNAMODB_TABLE_REPO_LOCKS;
+   }
+ 
+-  async acquireLock(repoFullName: string, lockOwner: string): Promise<void> {
++  async acquireLock(
++    repoFullName: string,
++    lockOwner: string,
++    opts?: { takeoverGraceSeconds?: number },
++  ): Promise<void> {
+     const config = getConfig();
+     const now = Math.floor(Date.now() / 1000);
++    const takeoverGraceSeconds = opts?.takeoverGraceSeconds ?? 30;
+     const ttl = now + config.REPO_LOCK_TTL_SECONDS;
+ 
+     const item: RepoLock = {
+@@ -35,7 +40,7 @@ export class RepoLocksService {
+           Item: item,
+           ConditionExpression: 'attribute_not_exists(repoFullName) OR #ttl < :now',
+           ExpressionAttributeNames: { '#ttl': 'ttl' },
+-          ExpressionAttributeValues: { ':now': now },
++          ExpressionAttributeValues: { ':now': now - takeoverGraceSeconds },
+         }),
+       );
+     } catch (err) {

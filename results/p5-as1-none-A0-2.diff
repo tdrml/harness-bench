@@ -1,0 +1,98 @@
+diff --git a/packages/core/src/writing/__tests__/writing.test.ts b/packages/core/src/writing/__tests__/writing.test.ts
+index f2bc211..3e1ccd5 100644
+--- a/packages/core/src/writing/__tests__/writing.test.ts
++++ b/packages/core/src/writing/__tests__/writing.test.ts
+@@ -275,6 +275,66 @@ describe('validateWordCount', () => {
+     expect(result.wordCount).toBe(0);
+     expect(result.valid).toBe(true);
+   });
++
++  describe('strict mode', () => {
++    it('treats em-dashes as word separators', () => {
++      const text = 'fire—and—forget';
++      const legacyResult = validateWordCount(text, { min: 1, max: 10 });
++      const strictResult = validateWordCount(text, { min: 1, max: 10 }, { mode: 'strict' });
++      expect(legacyResult.wordCount).toBe(1);
++      expect(strictResult.wordCount).toBe(3);
++    });
++
++    it('excludes pure-number tokens from count', () => {
++      const text = 'There are 42 items and 3.14 values and 1,000 units';
++      const legacyResult = validateWordCount(text, { min: 1, max: 20 });
++      const strictResult = validateWordCount(text, { min: 1, max: 20 }, { mode: 'strict' });
++      // Legacy: "There", "are", "42", "items", "and", "3.14", "values", "and", "1,000", "units" = 10
++      expect(legacyResult.wordCount).toBe(10);
++      // Strict: same minus 42, 3.14, 1,000 = 7
++      expect(strictResult.wordCount).toBe(7);
++    });
++
++    it('keeps tokens mixing digits and letters', () => {
++      const text = 'v2 upgrade and 3rd edition';
++      const strictResult = validateWordCount(text, { min: 1, max: 10 }, { mode: 'strict' });
++      // "v2", "upgrade", "and", "3rd", "edition" = 5 (all tokens kept, including v2 and 3rd)
++      expect(strictResult.wordCount).toBe(5);
++    });
++
++    it('keeps hyphenated compounds as one word', () => {
++      const text = 'state-of-the-art technology';
++      const legacyResult = validateWordCount(text, { min: 1, max: 10 });
++      const strictResult = validateWordCount(text, { min: 1, max: 10 }, { mode: 'strict' });
++      // Both should count "state-of-the-art" as one word: "state-of-the-art", "technology"
++      expect(legacyResult.wordCount).toBe(2);
++      expect(strictResult.wordCount).toBe(2);
++    });
++
++    it('combines em-dashes and number exclusion', () => {
++      const text = 'Section 1—intro with 42 words and Section 2—outro with 3 items';
++      const strictResult = validateWordCount(text, { min: 1, max: 20 }, { mode: 'strict' });
++      // Em-dashes split: "1—intro" → ["1", "intro"], "2—outro" → ["2", "outro"]
++      // All tokens: "Section", "1", "intro", "with", "42", "words", "and", "Section", "2", "outro", "with", "3", "items"
++      // After excluding pure numbers (1, 42, 2, 3):
++      // "Section", "intro", "with", "words", "and", "Section", "outro", "with", "items" = 9
++      expect(strictResult.wordCount).toBe(9);
++    });
++
++    it('defaults to legacy mode when mode is omitted', () => {
++      const text = 'fire—and—forget with 42 items';
++      const defaultResult = validateWordCount(text, { min: 1, max: 20 });
++      const legacyResult = validateWordCount(text, { min: 1, max: 20 }, { mode: 'legacy' });
++      expect(defaultResult.wordCount).toBe(legacyResult.wordCount);
++    });
++
++    it('handles pure numbers with various formats', () => {
++      const text = '10 plus 10.5 plus 1,000.99 plus 999';
++      const strictResult = validateWordCount(text, { min: 1, max: 20 }, { mode: 'strict' });
++      // "10", "plus", "10.5", "plus", "1,000.99", "plus", "999" → after filtering: "plus", "plus", "plus" = 3
++      expect(strictResult.wordCount).toBe(3);
++    });
++  });
+ });
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/packages/core/src/writing/word-count.ts b/packages/core/src/writing/word-count.ts
+index e81be9e..e518423 100644
+--- a/packages/core/src/writing/word-count.ts
++++ b/packages/core/src/writing/word-count.ts
+@@ -21,9 +21,21 @@ function stripMarkdown(text: string): string {
+ export function validateWordCount(
+   text: string,
+   target: { min: number; max: number },
++  opts?: { mode?: 'legacy' | 'strict' },
+ ): { valid: boolean; wordCount: number; deviation: number } {
++  const mode = opts?.mode ?? 'legacy';
+   const stripped = stripMarkdown(text);
+-  const words = stripped.split(/\s+/).filter((w) => w.length > 0);
++
++  let words = stripped.split(/\s+/).filter((w) => w.length > 0);
++
++  if (mode === 'strict') {
++    // In strict mode, em-dashes are word separators
++    words = words.flatMap((word) => word.split('—'));
++    words = words.filter((w) => w.length > 0);
++    // Pure-number tokens (e.g., 3, 3.14, 1,000) are excluded from count
++    words = words.filter((w) => !/^\d+([.,]\d+)*$/.test(w));
++  }
++
+   const wordCount = words.length;
+ 
+   let deviation = 0;
