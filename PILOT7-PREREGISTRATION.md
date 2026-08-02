@@ -192,3 +192,19 @@ This matters beyond bookkeeping: pilot 6 attributed its task-difficulty pattern 
 codebase scale on a stated 20K-vs-79K gap that is really **20K vs 31K**. That
 explanation is correspondingly weaker, and the README has been corrected to say so
 rather than edited quietly. See finding 18.
+
+---
+
+## Amendment 1 — 2026-08-02, before any graded run
+
+The shared preamble originally asserted "The full suite is green when your session
+starts." That is true for issue 1 and false for any issue following a failed
+predecessor — which is precisely the cascade condition this pilot exists to measure.
+It would have been a constant across all cells, so it threatened no comparison, but
+it is a false statement that could cost an agent turns arguing with its own test
+output. The clause is removed; the instruction to verify with
+`pnpm -s build && pnpm -s test` remains.
+
+No graded run had executed at the time of this amendment (only a one-issue plumbing
+test of the runner, journaled at `rep: 0` and excluded from analysis). Recorded here
+rather than edited into the design silently, per the study's append-only convention.

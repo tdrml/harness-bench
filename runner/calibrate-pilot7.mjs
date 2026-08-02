@@ -68,7 +68,8 @@ function grade(entry) {
     cpSync(join(entry.taskDir, file), d);
     dests.push(d);
   }
-  const types = spawnSync('pnpm', ['-s', 'build'], { cwd: REF, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
+  // NOT `-s`: the silent flag swallows tsc diagnostics (exit 1, no output).
+  const types = spawnSync('pnpm', ['build'], { cwd: REF, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
   const typesGreen = types.status === 0;
   const hold = spawnSync('pnpm', ['-s', 'vitest', 'run', 'zz-holdout', 'zz-integration'], {
     cwd: REF,

@@ -65,6 +65,9 @@ process.env.VITEST_MIN_FORKS = '1';
 const argv = process.argv.slice(2);
 const flag = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : null);
 const smoke = argv.includes('--smoke');
+// Plumbing test: run only the first N issues of the epic. A mechanical bug in
+// the runner should cost one cheap issue, not a whole epic.
+const maxIssues = flag('--max-issues') ? Number(flag('--max-issues')) : null;
 
 mkdirSync(RESULTS, { recursive: true });
 
@@ -190,6 +193,13 @@ function setupWorkdir(cell, rep) {
   rmSync(workdir, { recursive: true, force: true });
   mkdirSync(workdir, { recursive: true });
   execFileSync('cp', ['-a', `${REPOS[EPIC.repo].pristine}/.`, workdir]);
+  // The target repo does not gitignore `.claude/`, and this runner commits each
+  // issue with `git add -A`. Without a local exclude the harness's own hook
+  // config would be committed into the epic, show up in every per-issue diff,
+  // and - worst - be handed to the adversarial reviewer along with the agent's
+  // work, telling it exactly what it is being used to enforce. Excluded locally
+  // so the target repo's own .gitignore stays untouched.
+  writeFileSync(join(workdir, '.git', 'info', 'exclude'), '\n.claude/\n', { flag: 'a' });
   if (cell.arm === 'FULL') {
     mkdirSync(join(workdir, '.claude', 'hooks'), { recursive: true });
     cpSync(join(ROOT, 'arms', 'settings-gate.json'), join(workdir, '.claude', 'settings.json'));
@@ -253,7 +263,10 @@ function runHoldout(workdir, holdoutDirEntry) {
   // way to grade a *type*-level export (vitest transpiles without checking, and
   // a missing `export type` from a barrel is invisible at runtime). This is the
   // exact omission class the epic plants; grading it needs the compiler.
-  const types = spawnSync('pnpm', ['-s', 'build'], { cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
+  // NOT `-s`: pnpm's silent flag swallows tsc's diagnostics entirely, leaving a
+  // failing build with exit 1 and no output. The exit code is the verdict; the
+  // text is what makes an autopsy possible.
+  const types = spawnSync('pnpm', ['build'], { cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
   const typesGreen = types.status === 0;
 
   const hold = spawnSync('pnpm', ['-s', 'vitest', ...REPOS[EPIC.repo].vitestArgs, 'run', 'zz-holdout', 'zz-integration'], {
@@ -269,8 +282,8 @@ function runHoldout(workdir, holdoutDirEntry) {
   return {
     pass: typesGreen && hold.status === 0,
     typesGreen,
-    tail: (hold.stdout || '').split('\n').filter((l) => /×|Tests |Test Files|error TS/.test(l)).slice(-10),
-    typeTail: typesGreen ? [] : (types.stdout || types.stderr || '').split('\n').filter((l) => /error TS/.test(l)).slice(-10),
+    tail: (hold.stdout || '').split('\n').filter((l) => /×|Tests |Test Files/.test(l)).slice(-10),
+    typeTail: typesGreen ? [] : `${types.stdout || ''}${types.stderr || ''}`.split('\n').filter((l) => /error TS/.test(l)).slice(-10),
   };
 }
 
@@ -280,8 +293,11 @@ function issueHoldoutEntry(issueId) {
 }
 
 function scoreIssue(workdir, issueId, rec) {
-  const build = spawnSync('pnpm', ['-s', 'build'], { cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
+  const build = spawnSync('pnpm', ['build'], { cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
   rec.buildGreen = build.status === 0;
+  if (!rec.buildGreen) {
+    rec.buildTail = `${build.stdout || ''}${build.stderr || ''}`.split('\n').filter((l) => /error TS/.test(l)).slice(-10);
+  }
 
   const suite = spawnSync('pnpm', ['-s', 'test'], { cwd: workdir, encoding: 'utf8', timeout: 900000, maxBuffer: 64 * 1024 * 1024 });
   rec.visibleGreen = suite.status === 0;
@@ -340,7 +356,8 @@ async function runEpic(cell, rep) {
 
   let epicCost = 0;
   const t0 = Date.now();
-  for (const issue of EPIC.issues) {
+  const plannedIssues = maxIssues ? EPIC.issues.slice(0, maxIssues) : EPIC.issues;
+  for (const issue of plannedIssues) {
     if (doneIssues.has(issue.id)) continue;
     checkCeiling(`before ${epicKey}:${issue.id}`);
     if (epicCost > PER_EPIC_CAP_USD) {
@@ -398,25 +415,82 @@ async function runEpic(cell, rep) {
   }
 
   // --- epic-end re-grade: every issue holdout again + integration holdout ----
+  // Inject ALL holdouts at once and typecheck once, then run vitest per file.
+  // Re-grading eight holdouts one at a time would mean sixteen full builds per
+  // epic; this is the same verdict for a fraction of the wall clock. If the
+  // combined typecheck fails we cannot attribute the error, so fall back to
+  // grading each holdout on its own.
   const rollup = { event: 'epic', epicKey, epic: 'epic1', model: cell.model, arm: cell.arm, rep, regradeCostUsd: 0 };
-  const endBuild = spawnSync('pnpm', ['-s', 'build'], { cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
+  const endBuild = spawnSync('pnpm', ['build'], { cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
   rollup.endBuildGreen = endBuild.status === 0;
   const endSuite = spawnSync('pnpm', ['-s', 'test'], { cwd: workdir, encoding: 'utf8', timeout: 900000, maxBuffer: 64 * 1024 * 1024 });
   rollup.endVisibleGreen = endSuite.status === 0;
-  rollup.endHoldouts = {};
-  for (const issue of EPIC.issues) {
-    rollup.endHoldouts[issue.id] = runHoldout(workdir, issueHoldoutEntry(issue.id)).pass;
+
+  // The integration holdout only means anything once the whole epic has run;
+  // on a truncated plumbing run it is skipped rather than scored as a failure.
+  const gradeIntegration =
+    plannedIssues.length === EPIC.issues.length &&
+    Object.keys(EPIC.integration.files).every((f) => existsSync(join(EPIC_DIR, f)));
+  const allEntries = [...plannedIssues.map((i) => issueHoldoutEntry(i.id))];
+  if (gradeIntegration) allEntries.push({ taskDir: EPIC_DIR, map: EPIC.integration.files });
+  const injected = [];
+  for (const entry of allEntries) {
+    for (const [file, destDir] of Object.entries(entry.map)) {
+      mkdirSync(join(workdir, destDir), { recursive: true });
+      cpSync(join(entry.taskDir, file), join(workdir, destDir, `zz-${file}`));
+      injected.push(join(workdir, destDir, `zz-${file}`));
+    }
   }
-  const integ = runHoldout(workdir, { taskDir: EPIC_DIR, map: EPIC.integration.files });
-  rollup.integrationPass = integ.pass;
-  rollup.integrationTail = integ.tail;
-  rollup.epicStrict = rollup.endBuildGreen && rollup.endVisibleGreen && rollup.integrationPass && Object.values(rollup.endHoldouts).every(Boolean);
+  const combinedTypes = spawnSync('pnpm', ['build'], { cwd: workdir, encoding: 'utf8', timeout: 900000, maxBuffer: 32 * 1024 * 1024 });
+  const combinedTypesGreen = combinedTypes.status === 0;
+  rollup.endTypesGreen = combinedTypesGreen;
+
+  rollup.endHoldouts = {};
+  if (combinedTypesGreen) {
+    for (const issue of plannedIssues) {
+      const file = Object.keys(issueHoldoutEntry(issue.id).map)[0];
+      const r = spawnSync('pnpm', ['-s', 'vitest', ...REPOS[EPIC.repo].vitestArgs, 'run', `zz-${file}`], {
+        cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 64 * 1024 * 1024,
+      });
+      rollup.endHoldouts[issue.id] = r.status === 0;
+    }
+    if (gradeIntegration) {
+      const integFile = Object.keys(EPIC.integration.files)[0];
+      const ri = spawnSync('pnpm', ['-s', 'vitest', ...REPOS[EPIC.repo].vitestArgs, 'run', `zz-${integFile}`], {
+        cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 64 * 1024 * 1024,
+      });
+      rollup.integrationPass = ri.status === 0;
+      rollup.integrationTail = (ri.stdout || '').split('\n').filter((l) => /×|Tests |Test Files/.test(l)).slice(-10);
+    } else {
+      rollup.integrationPass = null;
+    }
+    for (const d of injected) rmSync(d, { force: true });
+    spawnSync('pnpm', ['build'], { cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
+  } else {
+    rollup.endTypeTail = `${combinedTypes.stdout || ''}${combinedTypes.stderr || ''}`.split('\n').filter((l) => /error TS/.test(l)).slice(-15);
+    for (const d of injected) rmSync(d, { force: true });
+    spawnSync('pnpm', ['build'], { cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
+    for (const issue of plannedIssues) rollup.endHoldouts[issue.id] = runHoldout(workdir, issueHoldoutEntry(issue.id)).pass;
+    if (gradeIntegration) {
+      const integ = runHoldout(workdir, { taskDir: EPIC_DIR, map: EPIC.integration.files });
+      rollup.integrationPass = integ.pass;
+      rollup.integrationTail = integ.tail;
+    } else {
+      rollup.integrationPass = null;
+    }
+  }
+  rollup.epicStrict =
+    rollup.endBuildGreen &&
+    rollup.endVisibleGreen &&
+    (gradeIntegration ? rollup.integrationPass === true : true) &&
+    plannedIssues.every((i) => rollup.endHoldouts[i.id] === true);
+  rollup.truncated = plannedIssues.length !== EPIC.issues.length;
   rollup.wallSecTotal = Math.round((Date.now() - t0) / 1000);
   rollup.epicCostUsd = Number(epicCost.toFixed(4));
   rollup.globalCostAfter = Number(globalCost.toFixed(4));
   writeFileSync(join(RESULTS, `p7-${epicKey.replace(/:/g, '-')}-FULL-EPIC.diff`), sh('git diff pilot7-baseline HEAD', { cwd: workdir, maxBuffer: 64 * 1024 * 1024 }));
   journal(rollup);
-  log(`EPIC ${epicKey}: strict=${rollup.epicStrict} integration=${rollup.integrationPass} endHoldouts=${Object.values(rollup.endHoldouts).filter(Boolean).length}/${EPIC.issues.length} $${epicCost.toFixed(2)} ${Math.round(rollup.wallSecTotal / 60)}min`);
+  log(`EPIC ${epicKey}: strict=${rollup.epicStrict} integration=${rollup.integrationPass} endHoldouts=${Object.values(rollup.endHoldouts).filter(Boolean).length}/${plannedIssues.length} $${epicCost.toFixed(2)} ${Math.round(rollup.wallSecTotal / 60)}min`);
   rmSync(workdir, { recursive: true, force: true });
 }
 
