@@ -1,0 +1,1730 @@
+diff --git a/packages/core/src/queue/__tests__/queue.test.ts b/packages/core/src/queue/__tests__/queue.test.ts
+index 06fc9e1..a22e69c 100644
+--- a/packages/core/src/queue/__tests__/queue.test.ts
++++ b/packages/core/src/queue/__tests__/queue.test.ts
+@@ -118,7 +118,7 @@ describe('enqueue', () => {
+     sqsMock.on(SendMessageCommand).resolves({ MessageId: 'msg-1' });
+ 
+     const item: WorkItem = { type: 'GENERATE_OUTLINE', projectId: 'proj-1' };
+-    await enqueue(queueUrl, item, undefined, client);
++    await enqueue({ queueUrl, workItem: item, sqsClient: client });
+ 
+     const calls = sqsMock.commandCalls(SendMessageCommand);
+     expect(calls).toHaveLength(1);
+@@ -140,7 +140,7 @@ describe('enqueue', () => {
+     for (const item of items) {
+       sqsMock.reset();
+       sqsMock.on(SendMessageCommand).resolves({});
+-      await enqueue(queueUrl, item, undefined, client);
++      await enqueue({ queueUrl, workItem: item, sqsClient: client });
+       const calls = sqsMock.commandCalls(SendMessageCommand);
+       expect(calls[0]!.args[0].input.QueueUrl).toBe(queueUrl);
+     }
+@@ -150,7 +150,7 @@ describe('enqueue', () => {
+     sqsMock.on(SendMessageCommand).resolves({});
+ 
+     const item: WorkItem = { type: 'PLAN_CHAPTERS', projectId: 'proj-42' };
+-    await enqueue(queueUrl, item, undefined, client);
++    await enqueue({ queueUrl, workItem: item, sqsClient: client });
+ 
+     const calls = sqsMock.commandCalls(SendMessageCommand);
+     expect(calls[0]!.args[0].input.MessageGroupId).toBe('proj-42-PLAN_CHAPTERS');
+@@ -160,7 +160,7 @@ describe('enqueue', () => {
+     sqsMock.on(SendMessageCommand).resolves({});
+ 
+     const item: WorkItem = { type: 'RECONCILE_SWEEP' };
+-    await enqueue(queueUrl, item, undefined, client);
++    await enqueue({ queueUrl, workItem: item, sqsClient: client });
+ 
+     const calls = sqsMock.commandCalls(SendMessageCommand);
+     expect(calls[0]!.args[0].input.MessageGroupId).toBe('global');
+@@ -173,7 +173,7 @@ describe('enqueue', () => {
+     sqsMock.on(SendMessageCommand).resolves({});
+ 
+     const item: WorkItem = { type: 'RECONCILE', projectId: 'proj-42', runId: 'run-abc' };
+-    await enqueue(queueUrl, item, undefined, client);
++    await enqueue({ queueUrl, workItem: item, sqsClient: client });
+ 
+     const calls = sqsMock.commandCalls(SendMessageCommand);
+     expect(calls[0]!.args[0].input.MessageGroupId).toBe('proj-42-RECONCILE-run-abc');
+@@ -183,7 +183,12 @@ describe('enqueue', () => {
+     sqsMock.on(SendMessageCommand).resolves({});
+ 
+     const item: WorkItem = { type: 'RECONCILE', projectId: 'proj-1', runId: 'run-1' };
+-    await enqueue(queueUrl, item, { messageGroupId: 'custom-group' }, client);
++    await enqueue({
++      queueUrl,
++      workItem: item,
++      options: { messageGroupId: 'custom-group' },
++      sqsClient: client,
++    });
+ 
+     const calls = sqsMock.commandCalls(SendMessageCommand);
+     expect(calls[0]!.args[0].input.MessageGroupId).toBe('custom-group');
+@@ -193,7 +198,12 @@ describe('enqueue', () => {
+     sqsMock.on(SendMessageCommand).resolves({});
+ 
+     const item: WorkItem = { type: 'BOOTSTRAP_REPO', projectId: 'proj-5', issueNumber: 1 };
+-    await enqueue(queueUrl, item, { deduplicationId: 'my-dedup-id' }, client);
++    await enqueue({
++      queueUrl,
++      workItem: item,
++      options: { deduplicationId: 'my-dedup-id' },
++      sqsClient: client,
++    });
+ 
+     const calls = sqsMock.commandCalls(SendMessageCommand);
+     expect(calls[0]!.args[0].input.MessageDeduplicationId).toBe('my-dedup-id');
+@@ -204,7 +214,7 @@ describe('enqueue', () => {
+     const before = Date.now();
+ 
+     const item: WorkItem = { type: 'CREATE_ISSUES', projectId: 'proj-7' };
+-    await enqueue(queueUrl, item, undefined, client);
++    await enqueue({ queueUrl, workItem: item, sqsClient: client });
+ 
+     const after = Date.now();
+     const calls = sqsMock.commandCalls(SendMessageCommand);
+@@ -220,7 +230,7 @@ describe('enqueue', () => {
+     sqsMock.on(SendMessageCommand).resolves({});
+ 
+     const item: WorkItem = { type: 'RECONCILE_SWEEP' };
+-    await enqueue(queueUrl, item, undefined, client);
++    await enqueue({ queueUrl, workItem: item, sqsClient: client });
+ 
+     const calls = sqsMock.commandCalls(SendMessageCommand);
+     const dedupId = calls[0]!.args[0].input.MessageDeduplicationId!;
+@@ -232,7 +242,7 @@ describe('enqueue', () => {
+ 
+     const item: WorkItem = { type: 'FINAL_REVIEW', projectId: 'proj-10' };
+     // No client passed — relies on internal creation
+-    await enqueue(queueUrl, item);
++    await enqueue({ queueUrl, workItem: item });
+ 
+     const calls = sqsMock.commandCalls(SendMessageCommand);
+     expect(calls).toHaveLength(1);
+diff --git a/packages/core/src/queue/enqueue.ts b/packages/core/src/queue/enqueue.ts
+index a3e6f33..e5e0e60 100644
+--- a/packages/core/src/queue/enqueue.ts
++++ b/packages/core/src/queue/enqueue.ts
+@@ -14,6 +14,13 @@ export interface EnqueueOptions {
+   delaySeconds?: number;
+ }
+ 
++export interface EnqueueParams {
++  queueUrl: string;
++  workItem: WorkItem;
++  options?: EnqueueOptions;
++  sqsClient?: SQSClient;
++}
++
+ function getProjectId(workItem: WorkItem): string | undefined {
+   if ('projectId' in workItem) {
+     return workItem.projectId;
+@@ -21,12 +28,12 @@ function getProjectId(workItem: WorkItem): string | undefined {
+   return undefined;
+ }
+ 
+-export async function enqueue(
+-  queueUrl: string,
+-  workItem: WorkItem,
+-  options?: EnqueueOptions,
+-  sqsClient?: SQSClient,
+-): Promise<void> {
++export async function enqueue({
++  queueUrl,
++  workItem,
++  options,
++  sqsClient,
++}: EnqueueParams): Promise<void> {
+   const client = sqsClient ?? new SQSClient({});
+ 
+   const projectId = getProjectId(workItem);
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index f291e73..0826293 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -37,5 +37,5 @@ export {
+ } from './schemas.js';
+ 
+ export { enqueue } from './enqueue.js';
+-export type { EnqueueOptions } from './enqueue.js';
++export type { EnqueueOptions, EnqueueParams } from './enqueue.js';
+ export { parseWorkItem } from './parse.js';
+diff --git a/packages/lambdas/src/__tests__/integration/concurrency.test.ts b/packages/lambdas/src/__tests__/integration/concurrency.test.ts
+index 6e92874..d853275 100644
+--- a/packages/lambdas/src/__tests__/integration/concurrency.test.ts
++++ b/packages/lambdas/src/__tests__/integration/concurrency.test.ts
+@@ -23,8 +23,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+     TaskOutputService: mockAws.MockTaskOutputService,
+     RateLimitService: mockAws.MockRateLimitService,
+     createGitHubClient: vi.fn().mockReturnValue(mockGitHub),
+-    enqueue: vi.fn().mockImplementation(async (_url: string, item: unknown) => {
+-      addToQueue(item);
++    enqueue: vi.fn().mockImplementation(async ({ workItem }: { workItem: unknown }) => {
++      addToQueue(workItem);
+     }),
+     validateProjectConfig: vi.fn().mockImplementation((data: Record<string, unknown>) => ({
+       ...TEST_PROJECT_CONFIG,
+diff --git a/packages/lambdas/src/__tests__/integration/continuity.test.ts b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+index aab8b67..3bed430 100644
+--- a/packages/lambdas/src/__tests__/integration/continuity.test.ts
++++ b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+@@ -26,8 +26,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+     TaskOutputService: mockAws.MockTaskOutputService,
+     RateLimitService: mockAws.MockRateLimitService,
+     createGitHubClient: vi.fn().mockReturnValue(mockGitHub),
+-    enqueue: vi.fn().mockImplementation(async (_url: string, item: unknown) => {
+-      addToQueue(item);
++    enqueue: vi.fn().mockImplementation(async ({ workItem }: { workItem: unknown }) => {
++      addToQueue(workItem);
+     }),
+     validateProjectConfig: vi.fn().mockImplementation((data: Record<string, unknown>) => ({
+       ...TEST_PROJECT_CONFIG,
+diff --git a/packages/lambdas/src/__tests__/integration/escalation.test.ts b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+index 786d7d5..a1e5d2b 100644
+--- a/packages/lambdas/src/__tests__/integration/escalation.test.ts
++++ b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+@@ -24,8 +24,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+     TaskOutputService: mockAws.MockTaskOutputService,
+     RateLimitService: mockAws.MockRateLimitService,
+     createGitHubClient: vi.fn().mockReturnValue(mockGitHub),
+-    enqueue: vi.fn().mockImplementation(async (_url: string, item: unknown) => {
+-      addToQueue(item);
++    enqueue: vi.fn().mockImplementation(async ({ workItem }: { workItem: unknown }) => {
++      addToQueue(workItem);
+     }),
+     validateProjectConfig: vi.fn().mockImplementation((data: Record<string, unknown>) => ({
+       ...TEST_PROJECT_CONFIG,
+diff --git a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+index 94efdd5..0c6f165 100644
+--- a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
++++ b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+@@ -26,8 +26,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+     TaskOutputService: mockAws.MockTaskOutputService,
+     RateLimitService: mockAws.MockRateLimitService,
+     createGitHubClient: vi.fn().mockReturnValue(mockGitHub),
+-    enqueue: vi.fn().mockImplementation(async (_url: string, item: unknown) => {
+-      addToQueue(item);
++    enqueue: vi.fn().mockImplementation(async ({ workItem }: { workItem: unknown }) => {
++      addToQueue(workItem);
+     }),
+     validateProjectConfig: vi.fn().mockImplementation((data: Record<string, unknown>) => ({
+       ...TEST_PROJECT_CONFIG,
+@@ -146,7 +146,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+ 
+     // Check that both CONTINUITY_AUDIT and FINAL_REVIEW were processed
+     const { enqueue } = await import('@auto-graph/core');
+-    const allEnqueued = vi.mocked(enqueue).mock.calls.map(([, item]) => item);
++    const allEnqueued = vi.mocked(enqueue).mock.calls.map(([{ workItem }]) => workItem);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'CONTINUITY_AUDIT')).toBe(true);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'FINAL_REVIEW')).toBe(true);
+ 
+@@ -179,7 +179,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+     await runAll();
+ 
+     const { enqueue } = await import('@auto-graph/core');
+-    const types = vi.mocked(enqueue).mock.calls.map(([, item]) => (item as { type: string }).type);
++    const types = vi.mocked(enqueue).mock.calls.map(([{ workItem }]) => (workItem as { type: string }).type);
+ 
+     // Verify the expected sequence of enqueued work items
+     const expectedSequence = [
+diff --git a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+index dcd9217..1881e44 100644
+--- a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
++++ b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+@@ -23,8 +23,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+     TaskOutputService: mockAws.MockTaskOutputService,
+     RateLimitService: mockAws.MockRateLimitService,
+     createGitHubClient: vi.fn().mockReturnValue(mockGitHub),
+-    enqueue: vi.fn().mockImplementation(async (_url: string, item: unknown) => {
+-      addToQueue(item);
++    enqueue: vi.fn().mockImplementation(async ({ workItem }: { workItem: unknown }) => {
++      addToQueue(workItem);
+     }),
+     validateProjectConfig: vi.fn().mockImplementation((data: Record<string, unknown>) => ({
+       ...TEST_PROJECT_CONFIG,
+@@ -104,7 +104,7 @@ describe('Revision loop', () => {
+     await runAll();
+ 
+     const { enqueue } = await import('@auto-graph/core');
+-    const types = vi.mocked(enqueue).mock.calls.map(([, item]) => (item as { type: string }).type);
++    const types = vi.mocked(enqueue).mock.calls.map(([{ workItem }]) => (workItem as { type: string }).type);
+ 
+     // Verify revision loop sequence
+     expect(types).toContain('REVISE_CHAPTER');
+@@ -132,10 +132,10 @@ describe('Revision loop', () => {
+ 
+     const { enqueue } = await import('@auto-graph/core');
+     const reviseCall = vi.mocked(enqueue).mock.calls.find(
+-      ([, item]) => (item as { type: string }).type === 'REVISE_CHAPTER',
++      ([{ workItem }]) => (workItem as { type: string }).type === 'REVISE_CHAPTER',
+     );
+     expect(reviseCall).toBeDefined();
+-    const reviseItem = reviseCall![1] as { type: string; revisionRound: number; reviewComments: string };
++    const reviseItem = reviseCall![0].workItem as { type: string; revisionRound: number; reviewComments: string };
+     expect(reviseItem.revisionRound).toBe(1);
+     expect(reviseItem.reviewComments).toBe(CHANGES_REQUESTED_REVIEW.body);
+   });
+@@ -177,7 +177,7 @@ describe('Revision loop', () => {
+     await runAll();
+ 
+     const { enqueue } = await import('@auto-graph/core');
+-    const types = vi.mocked(enqueue).mock.calls.map(([, item]) => (item as { type: string }).type);
++    const types = vi.mocked(enqueue).mock.calls.map(([{ workItem }]) => (workItem as { type: string }).type);
+ 
+     // REVIEW_CHAPTER should appear twice: initial review + after revision
+     const reviewCount = types.filter((t) => t === 'REVIEW_CHAPTER').length;
+@@ -200,7 +200,7 @@ describe('Revision loop', () => {
+     await runAll();
+ 
+     const { enqueue } = await import('@auto-graph/core');
+-    const types = vi.mocked(enqueue).mock.calls.map(([, item]) => (item as { type: string }).type);
++    const types = vi.mocked(enqueue).mock.calls.map(([{ workItem }]) => (workItem as { type: string }).type);
+ 
+     const reviseCalls = types.filter((t) => t === 'REVISE_CHAPTER');
+     expect(reviseCalls).toHaveLength(2);
+diff --git a/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts b/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
+index 3c116c2..b22b298 100644
+--- a/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
++++ b/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
+@@ -23,8 +23,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+     TaskOutputService: mockAws.MockTaskOutputService,
+     RateLimitService: mockAws.MockRateLimitService,
+     createGitHubClient: vi.fn().mockReturnValue(mockGitHub),
+-    enqueue: vi.fn().mockImplementation(async (_url: string, item: unknown) => {
+-      addToQueue(item);
++    enqueue: vi.fn().mockImplementation(async ({ workItem }: { workItem: unknown }) => {
++      addToQueue(workItem);
+     }),
+     validateProjectConfig: vi.fn().mockImplementation((data: Record<string, unknown>) => ({
+       ...TEST_PROJECT_CONFIG,
+diff --git a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+index f6c9882..865cc70 100644
+--- a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
++++ b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+@@ -23,8 +23,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+     TaskOutputService: mockAws.MockTaskOutputService,
+     RateLimitService: mockAws.MockRateLimitService,
+     createGitHubClient: vi.fn().mockReturnValue(mockGitHub),
+-    enqueue: vi.fn().mockImplementation(async (_url: string, item: unknown) => {
+-      addToQueue(item);
++    enqueue: vi.fn().mockImplementation(async ({ workItem }: { workItem: unknown }) => {
++      addToQueue(workItem);
+     }),
+     validateProjectConfig: vi.fn().mockImplementation((data: Record<string, unknown>) => ({
+       ...TEST_PROJECT_CONFIG,
+@@ -119,7 +119,7 @@ describe('Word count gate', () => {
+     await dispatch(reconcileWorkItem);
+ 
+     const { enqueue } = await import('@auto-graph/core');
+-    const types = vi.mocked(enqueue).mock.calls.map(([, item]) => (item as { type: string }).type);
++    const types = vi.mocked(enqueue).mock.calls.map(([{ workItem }]) => (workItem as { type: string }).type);
+     expect(types).not.toContain('REVIEW_CHAPTER');
+   });
+ 
+diff --git a/packages/lambdas/src/handlers/__tests__/bootstrap-project.test.ts b/packages/lambdas/src/handlers/__tests__/bootstrap-project.test.ts
+index 41b0cf4..0f253e9 100644
+--- a/packages/lambdas/src/handlers/__tests__/bootstrap-project.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/bootstrap-project.test.ts
+@@ -172,7 +172,7 @@ describe('BOOTSTRAP_PROJECT — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe('https://sqs.us-east-1.amazonaws.com/123/test.fifo');
+     expect(enqueuedItem.type).toBe('BOOTSTRAP_REPO');
+     if (enqueuedItem.type === 'BOOTSTRAP_REPO') {
+diff --git a/packages/lambdas/src/handlers/__tests__/bootstrap-repo.test.ts b/packages/lambdas/src/handlers/__tests__/bootstrap-repo.test.ts
+index dbaa52c..d1e8dc2 100644
+--- a/packages/lambdas/src/handlers/__tests__/bootstrap-repo.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/bootstrap-repo.test.ts
+@@ -198,7 +198,7 @@ describe('BOOTSTRAP_REPO — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe('https://sqs.us-east-1.amazonaws.com/123/test.fifo');
+     expect(enqueuedItem.type).toBe('GENERATE_OUTLINE');
+     if (enqueuedItem.type === 'GENERATE_OUTLINE') {
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
+index 83a9d70..6ab87ad 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
+@@ -275,7 +275,7 @@ describe('CONTINUITY_AUDIT — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+index 345fb1c..6b51ba3 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+@@ -297,7 +297,7 @@ describe('CONTINUITY_CHECK — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
+index d44cd30..9df1cff 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
+@@ -275,7 +275,7 @@ describe('CONTINUITY_FIX — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+diff --git a/packages/lambdas/src/handlers/__tests__/create-issues.test.ts b/packages/lambdas/src/handlers/__tests__/create-issues.test.ts
+index 0193bbc..c8e782c 100644
+--- a/packages/lambdas/src/handlers/__tests__/create-issues.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/create-issues.test.ts
+@@ -331,19 +331,19 @@ describe('CREATE_ISSUES — happy path', () => {
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledTimes(2);
+ 
+-    const firstEnqueue = vi.mocked(enqueue).mock.calls[0]!;
+-    expect(firstEnqueue[0]).toBe(baseEnv.SQS_QUEUE_URL);
+-    expect(firstEnqueue[1].type).toBe('TRIGGER_CHAPTER');
+-    if (firstEnqueue[1].type === 'TRIGGER_CHAPTER') {
+-      expect(firstEnqueue[1].projectId).toBe('proj-123');
+-      expect(firstEnqueue[1].nodeId).toBe('node-1');
+-      expect(firstEnqueue[1].chapterNumber).toBe(1);
++    const [firstEnqueue] = vi.mocked(enqueue).mock.calls[0]!;
++    expect(firstEnqueue.queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
++    expect(firstEnqueue.workItem.type).toBe('TRIGGER_CHAPTER');
++    if (firstEnqueue.workItem.type === 'TRIGGER_CHAPTER') {
++      expect(firstEnqueue.workItem.projectId).toBe('proj-123');
++      expect(firstEnqueue.workItem.nodeId).toBe('node-1');
++      expect(firstEnqueue.workItem.chapterNumber).toBe(1);
+     }
+ 
+-    const secondEnqueue = vi.mocked(enqueue).mock.calls[1]!;
+-    expect(secondEnqueue[1].type).toBe('TRIGGER_CHAPTER');
+-    if (secondEnqueue[1].type === 'TRIGGER_CHAPTER') {
+-      expect(secondEnqueue[1].nodeId).toBe('node-2');
++    const [secondEnqueue] = vi.mocked(enqueue).mock.calls[1]!;
++    expect(secondEnqueue.workItem.type).toBe('TRIGGER_CHAPTER');
++    if (secondEnqueue.workItem.type === 'TRIGGER_CHAPTER') {
++      expect(secondEnqueue.workItem.nodeId).toBe('node-2');
+     }
+   });
+ 
+diff --git a/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts b/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
+index 00bce21..4d77b5e 100644
+--- a/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
+@@ -245,7 +245,7 @@ describe('GENERATE_OUTLINE — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+diff --git a/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
+index f9c9e20..c1377b0 100644
+--- a/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
+@@ -309,7 +309,7 @@ describe('MERGE_CHAPTER — merge ready', () => {
+     const event = makeEvent([makeRecord(workItem)]);
+     await handler(event, {} as never, () => {});
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(enqueuedItem.type).toBe('CONTINUITY_CHECK');
+     if (enqueuedItem.type === 'CONTINUITY_CHECK') {
+@@ -414,7 +414,7 @@ describe('MERGE_CHAPTER — not ready: word count failure', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVISE_CHAPTER');
+     if (enqueuedItem.type === 'REVISE_CHAPTER') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+@@ -484,7 +484,7 @@ describe('MERGE_CHAPTER — not ready: no editorial approval', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(enqueuedItem.type).toBe('REVIEW_CHAPTER');
+     if (enqueuedItem.type === 'REVIEW_CHAPTER') {
+@@ -537,7 +537,7 @@ describe('MERGE_CHAPTER — not ready: changes requested', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVISE_CHAPTER');
+     if (enqueuedItem.type === 'REVISE_CHAPTER') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+diff --git a/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts b/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
+index c3870b8..83562bc 100644
+--- a/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
+@@ -240,7 +240,7 @@ describe('PLAN_CHAPTERS — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+diff --git a/packages/lambdas/src/handlers/__tests__/rate-limit-recovery.test.ts b/packages/lambdas/src/handlers/__tests__/rate-limit-recovery.test.ts
+index 194752c..6e09367 100644
+--- a/packages/lambdas/src/handlers/__tests__/rate-limit-recovery.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/rate-limit-recovery.test.ts
+@@ -217,7 +217,7 @@ describe('rate-limit-recovery — full recovery', () => {
+     await handler({ backoffUntil: '2024-01-01T00:00:00.000Z' } as never);
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, workItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(workItem).toEqual({ type: 'GENERATE_OUTLINE', projectId: 'proj-123' });
+   });
+ 
+@@ -229,7 +229,7 @@ describe('rate-limit-recovery — full recovery', () => {
+     await handler({ backoffUntil: '2024-01-01T00:00:00.000Z' } as never);
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, workItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(workItem).toMatchObject({
+       type: 'TRIGGER_CHAPTER',
+       projectId: 'proj-123',
+@@ -245,7 +245,7 @@ describe('rate-limit-recovery — full recovery', () => {
+ 
+     await handler({ backoffUntil: '2024-01-01T00:00:00.000Z' } as never);
+ 
+-    const [, workItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(workItem).toMatchObject({
+       type: 'REVIEW_CHAPTER',
+       projectId: 'proj-123',
+@@ -261,7 +261,7 @@ describe('rate-limit-recovery — full recovery', () => {
+ 
+     await handler({ backoffUntil: '2024-01-01T00:00:00.000Z' } as never);
+ 
+-    const [, workItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(workItem).toMatchObject({
+       type: 'REVISE_CHAPTER',
+       projectId: 'proj-123',
+@@ -278,7 +278,7 @@ describe('rate-limit-recovery — full recovery', () => {
+ 
+     await handler({ backoffUntil: '2024-01-01T00:00:00.000Z' } as never);
+ 
+-    const [, workItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(workItem).toEqual({
+       type: 'CONTINUITY_CHECK',
+       projectId: 'proj-123',
+@@ -293,7 +293,7 @@ describe('rate-limit-recovery — full recovery', () => {
+ 
+     await handler({ backoffUntil: '2024-01-01T00:00:00.000Z' } as never);
+ 
+-    const [, workItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(workItem).toEqual({ type: 'CONTINUITY_AUDIT', projectId: 'proj-123' });
+   });
+ 
+diff --git a/packages/lambdas/src/handlers/__tests__/reconcile-enqueuer.test.ts b/packages/lambdas/src/handlers/__tests__/reconcile-enqueuer.test.ts
+index ee54cac..593c64a 100644
+--- a/packages/lambdas/src/handlers/__tests__/reconcile-enqueuer.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/reconcile-enqueuer.test.ts
+@@ -204,7 +204,7 @@ describe('reconcile-enqueuer — stalled runs sweep', () => {
+     await handler(undefined);
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, workItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(workItem).toEqual({
+       type: 'RECONCILE',
+@@ -222,7 +222,7 @@ describe('reconcile-enqueuer — stalled runs sweep', () => {
+ 
+     await handler(undefined);
+ 
+-    const enqueuedItems = vi.mocked(enqueue).mock.calls.map(([, item]) => item);
++    const enqueuedItems = vi.mocked(enqueue).mock.calls.map(([{ workItem }]) => workItem);
+     expect(enqueuedItems).toContainEqual({ type: 'RECONCILE', projectId: 'proj-a', runId: 'run-1' });
+     expect(enqueuedItems).toContainEqual({ type: 'RECONCILE', projectId: 'proj-b', runId: 'run-2' });
+   });
+@@ -327,7 +327,7 @@ describe('reconcile-enqueuer — stalled nodes heartbeat', () => {
+     await handler(undefined);
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, workItem, options] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem, options }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(workItem).toEqual({
+       type: 'RECONCILE',
+       projectId: 'proj-123',
+@@ -356,7 +356,7 @@ describe('reconcile-enqueuer — stalled nodes heartbeat', () => {
+     await handler(undefined);
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, workItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(workItem).toEqual({
+       type: 'RECONCILE',
+       projectId: 'proj-123',
+@@ -417,7 +417,7 @@ describe('reconcile-enqueuer — stalled nodes heartbeat', () => {
+     await handler(undefined);
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledTimes(2);
+-    const enqueuedItems = vi.mocked(enqueue).mock.calls.map(([, item]) => item);
++    const enqueuedItems = vi.mocked(enqueue).mock.calls.map(([{ workItem }]) => workItem);
+     expect(enqueuedItems).toContainEqual({ type: 'RECONCILE', projectId: 'proj-a', runId: 'run-a1' });
+     expect(enqueuedItems).toContainEqual({ type: 'RECONCILE', projectId: 'proj-b', runId: 'run-b1' });
+   });
+@@ -466,7 +466,7 @@ describe('reconcile-enqueuer — stalled nodes heartbeat', () => {
+ 
+     await handler(undefined);
+ 
+-    const [, , options] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ options }] = vi.mocked(enqueue).mock.calls[0]!;
+     const expectedBucket = Math.floor(Date.now() / (15 * 60 * 1000));
+     expect(options?.deduplicationId).toBe(`heartbeat-node-abc-${expectedBucket}`);
+   });
+@@ -495,7 +495,7 @@ describe('reconcile-enqueuer — stalled projects sweep', () => {
+ 
+     // Sweep 3 should not enqueue TRIGGER_NEXT_CHAPTER
+     const triggerCalls = vi.mocked(enqueue).mock.calls.filter(
+-      ([, item]) => (item as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
++      ([{ workItem }]) => (workItem as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
+     );
+     expect(triggerCalls).toHaveLength(0);
+   });
+@@ -513,7 +513,7 @@ describe('reconcile-enqueuer — stalled projects sweep', () => {
+     await handler(undefined);
+ 
+     const triggerCalls = vi.mocked(enqueue).mock.calls.filter(
+-      ([, item]) => (item as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
++      ([{ workItem }]) => (workItem as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
+     );
+     expect(triggerCalls).toHaveLength(0);
+   });
+@@ -531,7 +531,7 @@ describe('reconcile-enqueuer — stalled projects sweep', () => {
+     await handler(undefined);
+ 
+     const triggerCalls = vi.mocked(enqueue).mock.calls.filter(
+-      ([, item]) => (item as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
++      ([{ workItem }]) => (workItem as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
+     );
+     expect(triggerCalls).toHaveLength(0);
+   });
+@@ -549,7 +549,7 @@ describe('reconcile-enqueuer — stalled projects sweep', () => {
+     await handler(undefined);
+ 
+     const triggerCalls = vi.mocked(enqueue).mock.calls.filter(
+-      ([, item]) => (item as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
++      ([{ workItem }]) => (workItem as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
+     );
+     expect(triggerCalls).toHaveLength(0);
+   });
+@@ -567,7 +567,7 @@ describe('reconcile-enqueuer — stalled projects sweep', () => {
+     await handler(undefined);
+ 
+     const triggerCalls = vi.mocked(enqueue).mock.calls.filter(
+-      ([, item]) => (item as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
++      ([{ workItem }]) => (workItem as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
+     );
+     expect(triggerCalls).toHaveLength(0);
+   });
+@@ -583,7 +583,7 @@ describe('reconcile-enqueuer — stalled projects sweep', () => {
+     await handler(undefined);
+ 
+     const triggerCalls = vi.mocked(enqueue).mock.calls.filter(
+-      ([, item]) => (item as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
++      ([{ workItem }]) => (workItem as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
+     );
+     expect(triggerCalls).toHaveLength(0);
+   });
+@@ -604,10 +604,10 @@ describe('reconcile-enqueuer — stalled projects sweep', () => {
+     await handler(undefined);
+ 
+     const triggerCalls = vi.mocked(enqueue).mock.calls.filter(
+-      ([, item]) => (item as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
++      ([{ workItem }]) => (workItem as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
+     );
+     expect(triggerCalls).toHaveLength(1);
+-    const [, workItem, options] = triggerCalls[0]!;
++    const [{ workItem, options }] = triggerCalls[0]!;
+     expect(workItem).toEqual({
+       type: 'TRIGGER_NEXT_CHAPTER',
+       projectId: 'proj-stalled',
+@@ -633,11 +633,11 @@ describe('reconcile-enqueuer — stalled projects sweep', () => {
+     await handler(undefined);
+ 
+     const triggerCalls = vi.mocked(enqueue).mock.calls.filter(
+-      ([, item]) => (item as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
++      ([{ workItem }]) => (workItem as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
+     );
+     expect(triggerCalls).toHaveLength(2);
+     const projectIds = triggerCalls.map(
+-      ([, item]) => (item as { projectId: string }).projectId,
++      ([{ workItem }]) => (workItem as { projectId: string }).projectId,
+     );
+     expect(projectIds).toContain('proj-a');
+     expect(projectIds).toContain('proj-b');
+@@ -656,9 +656,9 @@ describe('reconcile-enqueuer — stalled projects sweep', () => {
+     await handler(undefined);
+ 
+     const triggerCalls = vi.mocked(enqueue).mock.calls.filter(
+-      ([, item]) => (item as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
++      ([{ workItem }]) => (workItem as { type: string }).type === 'TRIGGER_NEXT_CHAPTER',
+     );
+-    const [, , options] = triggerCalls[0]!;
++    const [{ options }] = triggerCalls[0]!;
+     const expectedBucket = Math.floor(Date.now() / (15 * 60 * 1000));
+     expect(options?.deduplicationId).toBe(`stalled-project-proj-xyz-${expectedBucket}`);
+   });
+@@ -823,7 +823,7 @@ describe('Sweep 0: dispatcher stall detection', () => {
+     expect(lambdaMock.commandCalls(UpdateEventSourceMappingCommand)).toHaveLength(2);
+     // Sweep 1 still enqueued.
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, workItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(workItem).toEqual({
+       type: 'RECONCILE',
+       projectId: 'proj-x',
+diff --git a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+index 0326a0d..742c0f0 100644
+--- a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+@@ -414,7 +414,7 @@ describe('RECONCILE — task failure', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('TRIGGER_CHAPTER');
+   });
+ 
+@@ -473,7 +473,7 @@ describe('RECONCILE — task failure', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem).toEqual({ type: 'TRIGGER_NEXT_CHAPTER', projectId: 'proj-123' });
+   });
+ 
+@@ -543,7 +543,7 @@ describe('RECONCILE — outliner success', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem).toEqual({ type: 'PLAN_CHAPTERS', projectId: 'proj-123' });
+   });
+ });
+@@ -629,7 +629,7 @@ describe('RECONCILE — planner success', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem).toEqual({ type: 'CREATE_ISSUES', projectId: 'proj-123' });
+   });
+ });
+@@ -681,7 +681,7 @@ describe('RECONCILE — writer success (valid word count)', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVIEW_CHAPTER');
+     if (enqueuedItem.type === 'REVIEW_CHAPTER') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+@@ -698,7 +698,7 @@ describe('RECONCILE — writer success (valid word count)', () => {
+     const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+-    const [, , options] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ options }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(options).toEqual({ deduplicationId: 'REVIEW_CHAPTER-run-abc' });
+   });
+ 
+@@ -738,7 +738,7 @@ describe('RECONCILE — writer success (invalid word count)', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('TRIGGER_CHAPTER');
+     if (enqueuedItem.type === 'TRIGGER_CHAPTER') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+@@ -759,7 +759,7 @@ describe('RECONCILE — writer success (invalid word count)', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVIEW_CHAPTER');
+   });
+ });
+@@ -791,7 +791,7 @@ describe('RECONCILE — editor success (approved)', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('MERGE_CHAPTER');
+     if (enqueuedItem.type === 'MERGE_CHAPTER') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+@@ -858,7 +858,7 @@ describe('RECONCILE — editor success (changes requested)', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVISE_CHAPTER');
+     if (enqueuedItem.type === 'REVISE_CHAPTER') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+@@ -877,7 +877,7 @@ describe('RECONCILE — editor success (changes requested)', () => {
+     const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     if (enqueuedItem.type === 'REVISE_CHAPTER') {
+       expect(enqueuedItem.reviewComments.length).toBeGreaterThan(0);
+     }
+@@ -891,7 +891,7 @@ describe('RECONCILE — editor success (changes requested)', () => {
+     const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVISE_CHAPTER');
+   });
+ 
+@@ -903,7 +903,7 @@ describe('RECONCILE — editor success (changes requested)', () => {
+     const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('MERGE_CHAPTER');
+   });
+ 
+@@ -915,7 +915,7 @@ describe('RECONCILE — editor success (changes requested)', () => {
+     const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVISE_CHAPTER');
+     if (enqueuedItem.type === 'REVISE_CHAPTER') {
+       expect(enqueuedItem.reviewComments).toContain('VERDICT: REQUEST_CHANGES');
+@@ -933,7 +933,7 @@ describe('RECONCILE — editor success (changes requested)', () => {
+     const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('MERGE_CHAPTER');
+   });
+ 
+@@ -946,7 +946,7 @@ describe('RECONCILE — editor success (changes requested)', () => {
+     const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVISE_CHAPTER');
+   });
+ });
+@@ -965,7 +965,7 @@ describe('RECONCILE — reviser success', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVIEW_CHAPTER');
+     if (enqueuedItem.type === 'REVIEW_CHAPTER') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+@@ -1003,7 +1003,7 @@ describe('RECONCILE — continuity-checker success', () => {
+     await handler(makeEvent([makeRecord(workItem)]));
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem).toEqual({ type: 'TRIGGER_NEXT_CHAPTER', projectId: 'proj-123' });
+   });
+ 
+@@ -1265,7 +1265,7 @@ describe('RECONCILE — Step Functions invocation', () => {
+     // REVIEW_CHAPTER (default fixture is workerType: 'writer').
+     expect(mockAgentRunServiceMethods.get).toHaveBeenCalledWith('run-abc');
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVIEW_CHAPTER');
+   });
+ 
+@@ -1308,7 +1308,7 @@ describe('RECONCILE — Step Functions invocation', () => {
+ 
+     const reconcileEnqueues = vi
+       .mocked(enqueue)
+-      .mock.calls.filter(([, item]) => item.type === 'RECONCILE');
++      .mock.calls.filter(([{ workItem }]) => workItem.type === 'RECONCILE');
+     expect(reconcileEnqueues).toHaveLength(0);
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+index d2fdf18..048a8b6 100644
+--- a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+@@ -415,7 +415,7 @@ describe('REVIEW_CHAPTER — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+diff --git a/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
+index c168b2c..bf0baea 100644
+--- a/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
+@@ -311,7 +311,7 @@ describe('REVISE_CHAPTER — normal revision', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+@@ -444,7 +444,7 @@ describe('REVISE_CHAPTER — lock contention', () => {
+ 
+     expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem, enqueueOptions] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem, options: enqueueOptions }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVISE_CHAPTER');
+     if (enqueuedItem.type === 'REVISE_CHAPTER') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+diff --git a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+index 0b044fb..794afb5 100644
+--- a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+@@ -379,7 +379,7 @@ describe('TRIGGER_CHAPTER — happy path', () => {
+ 
+     expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, enqueuedItem, enqueueOptions] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: enqueuedItem, options: enqueueOptions }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('TRIGGER_CHAPTER');
+     if (enqueuedItem.type === 'TRIGGER_CHAPTER') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+@@ -493,7 +493,7 @@ describe('TRIGGER_CHAPTER — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl, workItem: enqueuedItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+diff --git a/packages/lambdas/src/handlers/__tests__/trigger-next-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/trigger-next-chapter.test.ts
+index d24fb1f..33446ba 100644
+--- a/packages/lambdas/src/handlers/__tests__/trigger-next-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/trigger-next-chapter.test.ts
+@@ -203,7 +203,7 @@ describe('TRIGGER_NEXT_CHAPTER — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledTimes(2);
+-    const [, firstItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: firstItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(firstItem.type).toBe('TRIGGER_CHAPTER');
+     if (firstItem.type === 'TRIGGER_CHAPTER') {
+       expect(firstItem.projectId).toBe('proj-123');
+@@ -249,7 +249,7 @@ describe('TRIGGER_NEXT_CHAPTER — happy path', () => {
+ 
+     // activeCount=1, concurrencyLimit=3 → 2 available slots, 2 ready → trigger 2
+     expect(vi.mocked(enqueue)).toHaveBeenCalledTimes(2);
+-    const [, item] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: item }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(item.type).toBe('TRIGGER_CHAPTER');
+   });
+ 
+@@ -284,7 +284,7 @@ describe('TRIGGER_NEXT_CHAPTER — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, item] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: item }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(item.type).toBe('CONTINUITY_AUDIT');
+     if (item.type === 'CONTINUITY_AUDIT') {
+       expect(item.projectId).toBe('proj-123');
+@@ -357,7 +357,7 @@ describe('TRIGGER_NEXT_CHAPTER — happy path', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledTimes(1);
+-    const [, item] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: item }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(item.type).toBe('TRIGGER_CHAPTER');
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/webhook-handler.test.ts b/packages/lambdas/src/handlers/__tests__/webhook-handler.test.ts
+index 4cada88..6eeaa79 100644
+--- a/packages/lambdas/src/handlers/__tests__/webhook-handler.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/webhook-handler.test.ts
+@@ -138,7 +138,7 @@ describe('issues event — kickoff', () => {
+ 
+     expect(result?.statusCode).toBe(202);
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [calledQueueUrl, calledItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ queueUrl: calledQueueUrl, workItem: calledItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(calledQueueUrl).toBe(QUEUE_URL_PREFIX);
+     expect(calledItem.type).toBe('BOOTSTRAP_PROJECT');
+     if (calledItem.type === 'BOOTSTRAP_PROJECT') {
+@@ -257,7 +257,7 @@ describe('pull_request_review event — approved', () => {
+ 
+     expect(result?.statusCode).toBe(200);
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, calledItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: calledItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(calledItem.type).toBe('MERGE_CHAPTER');
+     if (calledItem.type === 'MERGE_CHAPTER') {
+       expect(calledItem.projectId).toBe('proj-abc');
+@@ -301,7 +301,7 @@ describe('pull_request_review event — changes_requested', () => {
+ 
+     expect(result?.statusCode).toBe(200);
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, calledItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: calledItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(calledItem.type).toBe('REVISE_CHAPTER');
+     if (calledItem.type === 'REVISE_CHAPTER') {
+       expect(calledItem.projectId).toBe('proj-abc');
+@@ -328,7 +328,7 @@ describe('pull_request_review event — changes_requested', () => {
+     const event = makeEvent('pull_request_review', payload);
+     await handler(event, {} as never, () => {});
+ 
+-    const [, calledItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: calledItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     if (calledItem.type === 'REVISE_CHAPTER') {
+       expect(calledItem.revisionRound).toBe(3);
+     }
+@@ -392,7 +392,7 @@ describe('pull_request event — merged', () => {
+ 
+     expect(result?.statusCode).toBe(200);
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+-    const [, calledItem] = vi.mocked(enqueue).mock.calls[0]!;
++    const [{ workItem: calledItem }] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(calledItem.type).toBe('CONTINUITY_CHECK');
+     if (calledItem.type === 'CONTINUITY_CHECK') {
+       expect(calledItem.projectId).toBe('proj-abc');
+diff --git a/packages/lambdas/src/handlers/bootstrap-project.ts b/packages/lambdas/src/handlers/bootstrap-project.ts
+index 001732a..78d4f54 100644
+--- a/packages/lambdas/src/handlers/bootstrap-project.ts
++++ b/packages/lambdas/src/handlers/bootstrap-project.ts
+@@ -79,10 +79,13 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   );
+ 
+   // Enqueue the next pipeline step
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'BOOTSTRAP_REPO',
+-    projectId,
+-    issueNumber,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'BOOTSTRAP_REPO',
++      projectId,
++      issueNumber,
++    },
+   });
+ 
+   // Update status to confirm the write succeeded
+diff --git a/packages/lambdas/src/handlers/bootstrap-repo.ts b/packages/lambdas/src/handlers/bootstrap-repo.ts
+index 708983f..b1c3cd6 100644
+--- a/packages/lambdas/src/handlers/bootstrap-repo.ts
++++ b/packages/lambdas/src/handlers/bootstrap-repo.ts
+@@ -217,9 +217,12 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   await projectService.updateRepo(projectId, repoUrl, 'OUTLINING');
+ 
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'GENERATE_OUTLINE',
+-    projectId,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'GENERATE_OUTLINE',
++      projectId,
++    },
+   });
+ 
+   logger.info('Bootstrap repo complete', { projectId, repoUrl });
+diff --git a/packages/lambdas/src/handlers/continuity-audit.ts b/packages/lambdas/src/handlers/continuity-audit.ts
+index 419240e..3ec32e1 100644
+--- a/packages/lambdas/src/handlers/continuity-audit.ts
++++ b/packages/lambdas/src/handlers/continuity-audit.ts
+@@ -88,10 +88,13 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     startedAt: now,
+   });
+ 
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'RECONCILE',
+-    projectId,
+-    runId,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'RECONCILE',
++      projectId,
++      runId,
++    },
+   });
+ 
+   logger.info('Auditor ECS task launched', {
+diff --git a/packages/lambdas/src/handlers/continuity-check.ts b/packages/lambdas/src/handlers/continuity-check.ts
+index d3db2a5..c3ec4b9 100644
+--- a/packages/lambdas/src/handlers/continuity-check.ts
++++ b/packages/lambdas/src/handlers/continuity-check.ts
+@@ -117,10 +117,13 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     startedAt: now,
+   });
+ 
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'RECONCILE',
+-    projectId,
+-    runId,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'RECONCILE',
++      projectId,
++      runId,
++    },
+   });
+ 
+   logger.info('Continuity-checker ECS task launched', {
+diff --git a/packages/lambdas/src/handlers/continuity-fixer.ts b/packages/lambdas/src/handlers/continuity-fixer.ts
+index a9e6fab..8606f0e 100644
+--- a/packages/lambdas/src/handlers/continuity-fixer.ts
++++ b/packages/lambdas/src/handlers/continuity-fixer.ts
+@@ -88,10 +88,13 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     startedAt: now,
+   });
+ 
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'RECONCILE',
+-    projectId,
+-    runId,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'RECONCILE',
++      projectId,
++      runId,
++    },
+   });
+ 
+   logger.info('Fixer ECS task launched', {
+diff --git a/packages/lambdas/src/handlers/create-issues.ts b/packages/lambdas/src/handlers/create-issues.ts
+index 5f5668e..0c15205 100644
+--- a/packages/lambdas/src/handlers/create-issues.ts
++++ b/packages/lambdas/src/handlers/create-issues.ts
+@@ -49,11 +49,14 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     const firstBatch = readyNodes.slice(0, concurrencyLimit);
+ 
+     for (const node of firstBatch) {
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'TRIGGER_CHAPTER',
+-        projectId,
+-        nodeId: node.nodeId,
+-        chapterNumber: node.chapterNumber,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'TRIGGER_CHAPTER',
++          projectId,
++          nodeId: node.nodeId,
++          chapterNumber: node.chapterNumber,
++        },
+       });
+     }
+ 
+@@ -136,11 +139,14 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   const firstBatch = readyNodes.slice(0, concurrencyLimit);
+ 
+   for (const node of firstBatch) {
+-    await enqueue(config.SQS_QUEUE_URL, {
+-      type: 'TRIGGER_CHAPTER',
+-      projectId,
+-      nodeId: node.nodeId,
+-      chapterNumber: node.chapterNumber,
++    await enqueue({
++      queueUrl: config.SQS_QUEUE_URL,
++      workItem: {
++        type: 'TRIGGER_CHAPTER',
++        projectId,
++        nodeId: node.nodeId,
++        chapterNumber: node.chapterNumber,
++      },
+     });
+ 
+     logger.info('Enqueued TRIGGER_CHAPTER', {
+diff --git a/packages/lambdas/src/handlers/generate-outline.ts b/packages/lambdas/src/handlers/generate-outline.ts
+index 0e09b62..eff3165 100644
+--- a/packages/lambdas/src/handlers/generate-outline.ts
++++ b/packages/lambdas/src/handlers/generate-outline.ts
+@@ -85,10 +85,13 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   await projectService.updateStatus(projectId, 'OUTLINING');
+ 
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'RECONCILE',
+-    projectId,
+-    runId,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'RECONCILE',
++      projectId,
++      runId,
++    },
+   });
+ 
+   logger.info('Generate outline launched', { projectId, runId, taskArn });
+diff --git a/packages/lambdas/src/handlers/merge-chapter.ts b/packages/lambdas/src/handlers/merge-chapter.ts
+index 5159b6f..b8e8274 100644
+--- a/packages/lambdas/src/handlers/merge-chapter.ts
++++ b/packages/lambdas/src/handlers/merge-chapter.ts
+@@ -128,21 +128,27 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     await github.addPRComment(repo, prNumber, comment);
+ 
+     if (editorialVerdict === 'PENDING') {
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'REVIEW_CHAPTER',
+-        projectId,
+-        nodeId,
+-        prNumber,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'REVIEW_CHAPTER',
++          projectId,
++          nodeId,
++          prNumber,
++        },
+       });
+     } else {
+       const reviewComments = readiness.reasons.join('\n');
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'REVISE_CHAPTER',
+-        projectId,
+-        nodeId,
+-        prNumber,
+-        reviewComments,
+-        revisionRound: node.revisionRound + 1,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'REVISE_CHAPTER',
++          projectId,
++          nodeId,
++          prNumber,
++          reviewComments,
++          revisionRound: node.revisionRound + 1,
++        },
+       });
+     }
+ 
+@@ -186,10 +192,13 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   await repoLockService.release(project.repoName);
+ 
+   // Enqueue CONTINUITY_CHECK
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'CONTINUITY_CHECK',
+-    projectId,
+-    nodeId,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'CONTINUITY_CHECK',
++      projectId,
++      nodeId,
++    },
+   });
+ 
+   logger.info('Chapter merged successfully', {
+diff --git a/packages/lambdas/src/handlers/plan-chapters.ts b/packages/lambdas/src/handlers/plan-chapters.ts
+index 3b6f5e8..2e015b8 100644
+--- a/packages/lambdas/src/handlers/plan-chapters.ts
++++ b/packages/lambdas/src/handlers/plan-chapters.ts
+@@ -79,10 +79,13 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   await projectService.updateStatus(projectId, 'PLANNING');
+ 
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'RECONCILE',
+-    projectId,
+-    runId,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'RECONCILE',
++      projectId,
++      runId,
++    },
+   });
+ 
+   logger.info('Plan chapters launched', { projectId, runId, taskArn });
+diff --git a/packages/lambdas/src/handlers/rate-limit-recovery.ts b/packages/lambdas/src/handlers/rate-limit-recovery.ts
+index 05db964..11903b5 100644
+--- a/packages/lambdas/src/handlers/rate-limit-recovery.ts
++++ b/packages/lambdas/src/handlers/rate-limit-recovery.ts
+@@ -159,17 +159,23 @@ async function reEnqueueWork(
+ 
+   switch (workerType) {
+     case 'outliner': {
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'GENERATE_OUTLINE',
+-        projectId,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'GENERATE_OUTLINE',
++          projectId,
++        },
+       });
+       break;
+     }
+ 
+     case 'planner': {
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'PLAN_CHAPTERS',
+-        projectId,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'PLAN_CHAPTERS',
++          projectId,
++        },
+       });
+       break;
+     }
+@@ -177,11 +183,14 @@ async function reEnqueueWork(
+     case 'writer': {
+       if (!nodeId) throw new Error(`Writer run ${run.runId} missing nodeId`);
+       const node = await getNode(taskGraphService, projectId, nodeId);
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'TRIGGER_CHAPTER',
+-        projectId,
+-        nodeId,
+-        chapterNumber: node.chapterNumber,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'TRIGGER_CHAPTER',
++          projectId,
++          nodeId,
++          chapterNumber: node.chapterNumber,
++        },
+       });
+       break;
+     }
+@@ -190,11 +199,14 @@ async function reEnqueueWork(
+       if (!nodeId) throw new Error(`Editor run ${run.runId} missing nodeId`);
+       const node = await getNode(taskGraphService, projectId, nodeId);
+       const prNumber = await lookupPrNumber(projectService, github, config, projectId, node.chapterNumber);
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'REVIEW_CHAPTER',
+-        projectId,
+-        nodeId,
+-        prNumber,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'REVIEW_CHAPTER',
++          projectId,
++          nodeId,
++          prNumber,
++        },
+       });
+       break;
+     }
+@@ -203,31 +215,40 @@ async function reEnqueueWork(
+       if (!nodeId) throw new Error(`Reviser run ${run.runId} missing nodeId`);
+       const node = await getNode(taskGraphService, projectId, nodeId);
+       const prNumber = await lookupPrNumber(projectService, github, config, projectId, node.chapterNumber);
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'REVISE_CHAPTER',
+-        projectId,
+-        nodeId,
+-        prNumber,
+-        reviewComments: 'Retrying after rate limit pause. Please review the PR review comments for revision guidance.',
+-        revisionRound: node.revisionRound,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'REVISE_CHAPTER',
++          projectId,
++          nodeId,
++          prNumber,
++          reviewComments: 'Retrying after rate limit pause. Please review the PR review comments for revision guidance.',
++          revisionRound: node.revisionRound,
++        },
+       });
+       break;
+     }
+ 
+     case 'continuity-checker': {
+       if (!nodeId) throw new Error(`Continuity-checker run ${run.runId} missing nodeId`);
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'CONTINUITY_CHECK',
+-        projectId,
+-        nodeId,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'CONTINUITY_CHECK',
++          projectId,
++          nodeId,
++        },
+       });
+       break;
+     }
+ 
+     case 'auditor': {
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'CONTINUITY_AUDIT',
+-        projectId,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'CONTINUITY_AUDIT',
++          projectId,
++        },
+       });
+       break;
+     }
+diff --git a/packages/lambdas/src/handlers/reconcile-enqueuer.ts b/packages/lambdas/src/handlers/reconcile-enqueuer.ts
+index 1501b75..8a7b99d 100644
+--- a/packages/lambdas/src/handlers/reconcile-enqueuer.ts
++++ b/packages/lambdas/src/handlers/reconcile-enqueuer.ts
+@@ -221,10 +221,13 @@ export const handler = async (_event: unknown): Promise<void> => {
+   logger.info('Sweep 1: stalled runs', { count: stalledRuns.length });
+ 
+   for (const run of stalledRuns) {
+-    await enqueue(config.SQS_QUEUE_URL, {
+-      type: 'RECONCILE',
+-      projectId: run.projectId,
+-      runId: run.runId,
++    await enqueue({
++      queueUrl: config.SQS_QUEUE_URL,
++      workItem: {
++        type: 'RECONCILE',
++        projectId: run.projectId,
++        runId: run.runId,
++      },
+     });
+ 
+     logger.info('Enqueued RECONCILE for stalled run', {
+@@ -294,15 +297,15 @@ export const handler = async (_event: unknown): Promise<void> => {
+       // action (idempotent — it will re-check ECS status, update agent run
+       // status, and enqueue the appropriate downstream message).
+       const timeBucket = Math.floor(Date.now() / HEARTBEAT_BUCKET_MS);
+-      await enqueue(
+-        config.SQS_QUEUE_URL,
+-        {
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
+           type: 'RECONCILE',
+           projectId: project.projectId,
+           runId: node.assignedRunId,
+         },
+-        { deduplicationId: `heartbeat-${node.nodeId}-${timeBucket}` },
+-      );
++        options: { deduplicationId: `heartbeat-${node.nodeId}-${timeBucket}` },
++      });
+ 
+       stalledNodeCount++;
+       logger.info('Heartbeat: re-enqueued RECONCILE for stalled node', {
+@@ -346,11 +349,11 @@ export const handler = async (_event: unknown): Promise<void> => {
+ 
+       // Project is stalled — re-enqueue TRIGGER_NEXT_CHAPTER
+       const timeBucket = Math.floor(Date.now() / HEARTBEAT_BUCKET_MS);
+-      await enqueue(
+-        config.SQS_QUEUE_URL,
+-        { type: 'TRIGGER_NEXT_CHAPTER', projectId: project.projectId },
+-        { deduplicationId: `stalled-project-${project.projectId}-${timeBucket}` },
+-      );
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: { type: 'TRIGGER_NEXT_CHAPTER', projectId: project.projectId },
++        options: { deduplicationId: `stalled-project-${project.projectId}-${timeBucket}` },
++      });
+ 
+       stalledProjectCount++;
+       logger.info('Sweep 3: re-enqueued TRIGGER_NEXT_CHAPTER for stalled project', {
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 8e2e77f..2663987 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -32,8 +32,12 @@ async function enqueueReaction<T extends WorkItem>(
+   item: T,
+   sourceRunId: string,
+ ): Promise<void> {
+-  await enqueue(queueUrl, item, {
+-    deduplicationId: `${item.type}-${sourceRunId}`,
++  await enqueue({
++    queueUrl,
++    workItem: item,
++    options: {
++      deduplicationId: `${item.type}-${sourceRunId}`,
++    },
+   });
+ }
+ 
+diff --git a/packages/lambdas/src/handlers/review-chapter.ts b/packages/lambdas/src/handlers/review-chapter.ts
+index 8adb20f..1005faf 100644
+--- a/packages/lambdas/src/handlers/review-chapter.ts
++++ b/packages/lambdas/src/handlers/review-chapter.ts
+@@ -130,10 +130,13 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   await taskGraphService.updateNodeStatus(projectId, taskGraph.version, nodeId, 'REVIEWING', runId);
+ 
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'RECONCILE',
+-    projectId,
+-    runId,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'RECONCILE',
++      projectId,
++      runId,
++    },
+   });
+ 
+   logger.info('Editor ECS task launched', {
+diff --git a/packages/lambdas/src/handlers/revise-chapter.ts b/packages/lambdas/src/handlers/revise-chapter.ts
+index 3dd525a..f0c04b0 100644
+--- a/packages/lambdas/src/handlers/revise-chapter.ts
++++ b/packages/lambdas/src/handlers/revise-chapter.ts
+@@ -99,11 +99,11 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+       nodeId,
+       repoName: project.repoName,
+     });
+-    await enqueue(
+-      config.SQS_QUEUE_URL,
+-      { type: 'REVISE_CHAPTER', projectId, nodeId, prNumber, reviewComments, revisionRound },
+-      { delaySeconds: 60 },
+-    );
++    await enqueue({
++      queueUrl: config.SQS_QUEUE_URL,
++      workItem: { type: 'REVISE_CHAPTER', projectId, nodeId, prNumber, reviewComments, revisionRound },
++      options: { delaySeconds: 60 },
++    });
+     return;
+   }
+ 
+@@ -157,10 +157,13 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     revisionRound,
+   );
+ 
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'RECONCILE',
+-    projectId,
+-    runId,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'RECONCILE',
++      projectId,
++      runId,
++    },
+   });
+ 
+   logger.info('Reviser ECS task launched', {
+diff --git a/packages/lambdas/src/handlers/trigger-chapter.ts b/packages/lambdas/src/handlers/trigger-chapter.ts
+index cc7047c..76920cf 100644
+--- a/packages/lambdas/src/handlers/trigger-chapter.ts
++++ b/packages/lambdas/src/handlers/trigger-chapter.ts
+@@ -106,11 +106,11 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+       nodeId,
+       repoName: project.repoName,
+     });
+-    await enqueue(
+-      config.SQS_QUEUE_URL,
+-      { type: 'TRIGGER_CHAPTER', projectId, nodeId, chapterNumber },
+-      { delaySeconds: 60 },
+-    );
++    await enqueue({
++      queueUrl: config.SQS_QUEUE_URL,
++      workItem: { type: 'TRIGGER_CHAPTER', projectId, nodeId, chapterNumber },
++      options: { delaySeconds: 60 },
++    });
+     return;
+   }
+ 
+@@ -159,10 +159,13 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   await taskGraphService.updateNodeStatus(projectId, taskGraph.version, nodeId, 'WRITING', runId);
+ 
+-  await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'RECONCILE',
+-    projectId,
+-    runId,
++  await enqueue({
++    queueUrl: config.SQS_QUEUE_URL,
++    workItem: {
++      type: 'RECONCILE',
++      projectId,
++      runId,
++    },
+   });
+ 
+   logger.info('Writer ECS task launched', {
+diff --git a/packages/lambdas/src/handlers/trigger-next-chapter.ts b/packages/lambdas/src/handlers/trigger-next-chapter.ts
+index b7c7e64..d4e7ddf 100644
+--- a/packages/lambdas/src/handlers/trigger-next-chapter.ts
++++ b/packages/lambdas/src/handlers/trigger-next-chapter.ts
+@@ -43,11 +43,14 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   if (toTrigger.length > 0) {
+     for (const node of toTrigger) {
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'TRIGGER_CHAPTER',
+-        projectId,
+-        nodeId: node.nodeId,
+-        chapterNumber: node.chapterNumber,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'TRIGGER_CHAPTER',
++          projectId,
++          nodeId: node.nodeId,
++          chapterNumber: node.chapterNumber,
++        },
+       });
+ 
+       logger.info('Enqueued TRIGGER_CHAPTER', {
+@@ -62,9 +65,12 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     const allMerged = taskGraph.nodes.every((n) => n.status === 'MERGED');
+ 
+     if (allMerged) {
+-      await enqueue(config.SQS_QUEUE_URL, {
+-        type: 'CONTINUITY_AUDIT',
+-        projectId,
++      await enqueue({
++        queueUrl: config.SQS_QUEUE_URL,
++        workItem: {
++          type: 'CONTINUITY_AUDIT',
++          projectId,
++        },
+       });
+ 
+       logger.info('All chapters complete, enqueued CONTINUITY_AUDIT', { projectId });
+diff --git a/packages/lambdas/src/handlers/webhook-handler.ts b/packages/lambdas/src/handlers/webhook-handler.ts
+index 5c8e978..4da8b33 100644
+--- a/packages/lambdas/src/handlers/webhook-handler.ts
++++ b/packages/lambdas/src/handlers/webhook-handler.ts
+@@ -87,11 +87,14 @@ async function handleIssueEvent(
+     );
+   }
+ 
+-  await enqueue(queueUrlPrefix, {
+-    type: 'BOOTSTRAP_PROJECT',
+-    projectId,
+-    issueNumber: issue.number,
+-    issueBody,
++  await enqueue({
++    queueUrl: queueUrlPrefix,
++    workItem: {
++      type: 'BOOTSTRAP_PROJECT',
++      projectId,
++      issueNumber: issue.number,
++      issueBody,
++    },
+   });
+ 
+   return accepted({});
+@@ -114,11 +117,14 @@ async function handlePullRequestReviewEvent(
+   }
+ 
+   if (review.state === 'approved') {
+-    await enqueue(queueUrlPrefix, {
+-      type: 'MERGE_CHAPTER',
+-      projectId,
+-      nodeId,
+-      prNumber: pr.number,
++    await enqueue({
++      queueUrl: queueUrlPrefix,
++      workItem: {
++        type: 'MERGE_CHAPTER',
++        projectId,
++        nodeId,
++        prNumber: pr.number,
++      },
+     });
+     return success({});
+   }
+@@ -129,13 +135,16 @@ async function handlePullRequestReviewEvent(
+       ? (parseInt(revisionLabel.name.slice('revision:'.length), 10) || 1)
+       : 1;
+ 
+-    await enqueue(queueUrlPrefix, {
+-      type: 'REVISE_CHAPTER',
+-      projectId,
+-      nodeId,
+-      prNumber: pr.number,
+-      reviewComments: review.body ?? '',
+-      revisionRound,
++    await enqueue({
++      queueUrl: queueUrlPrefix,
++      workItem: {
++        type: 'REVISE_CHAPTER',
++        projectId,
++        nodeId,
++        prNumber: pr.number,
++        reviewComments: review.body ?? '',
++        revisionRound,
++      },
+     });
+     return success({});
+   }
+@@ -157,10 +166,13 @@ async function handlePullRequestEvent(
+       return badRequest('Missing project or chapter labels on PR');
+     }
+ 
+-    await enqueue(queueUrlPrefix, {
+-      type: 'CONTINUITY_CHECK',
+-      projectId,
+-      nodeId,
++    await enqueue({
++      queueUrl: queueUrlPrefix,
++      workItem: {
++        type: 'CONTINUITY_CHECK',
++        projectId,
++        nodeId,
++      },
+     });
+   }
+ 

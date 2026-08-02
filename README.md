@@ -16,6 +16,8 @@ So I tried to measure the same layers under controlled conditions: same model, s
 
 The interesting conclusion is the tension between those two facts: **harness ROI is a function of horizon, not a constant.** Below some task-length/autonomy threshold, frontier models don't need the scaffolding. Production fleets operate far above that threshold, where the same scaffolding blocks failures continuously. Benchmarks that grade harnesses on short tasks are measuring the flat part of the curve.
 
+**Pilot 6 asked the question the study had been dodging: can a harness buy what a better model buys?** Sometimes, and it depends entirely on *how* the task fails. On a 34-site mechanical migration, both frontier tiers succeeded bare where the cheap model needed the harness — and **bare Opus was the cheapest path to a correct result of any configuration tested** ($2.43/success vs $3.55 for haiku+harness), because it needed a third of the turns. On a task whose failure mode is *omission*, **nothing worked: 0 of 18 runs across all three tiers and both arms, 17 of them silent.** § Pilot 6.
+
 **Pilot 5 replicated it at n=3 on two repos — and found the sharp edge of planning.** Across 72 runs on 6 new tasks, only one configuration went perfect: **plan + full harness, 18/18**. Bare-with-plan went 14/18, *below* bare-without-plan (16/18), and the autopsy explains why: a plan substitutes for exploration, so when its consistency sweep is incomplete, the executor stops at the checklist instead of discovering the gap. No comparison reaches p<0.05 — see § Pilot 5 for why that honest caveat matters more than the point estimates.
 
 **Pilot 4 then split the harness's value in two.** Giving the same failing executor a written implementation plan — authored by *any* tier, including haiku planning for itself — fixed the spec-misreading failures completely (planned haiku: 17/18 bare vs 1/3 unplanned), but the one failure that survived was the follow-through relapse, and only the enforcement loop closed it reliably. **Plan for the *what*, harness for the *whether*.**
@@ -150,6 +152,41 @@ Tasks split evenly into two classes. **Breadth**: inject table names into 5 serv
 
 *Residual instrument note:* 2 of 36 reviewer verdicts were still `UNPARSEABLE` despite the salvage retry added after Finding 7 — a reminder that inter-agent contracts degrade rather than fail cleanly. Both affected runs passed on their own merits.
 
+---
+
+## Pilot 6 — model tier × enforcement
+
+Pilots 4 and 5 used haiku as the executor for all 96 runs; the study's only tier comparison was pilot 3's n=1, and Opus had never written a line of code here. Pilot 6 fixes that: 2 tasks × {haiku, sonnet-5, opus-5} × {A0, FULL} × n=3 = 36 runs, $121.31, no planning arm.
+
+**Getting to two tasks took four discards.** Every telos candidate saturated at the pilot-6 baseline (bare haiku, no plan): tb1 3/3, tb2 3/3, tb3 3/3. Only auto-graph tasks broke the cheap model. **Difficulty tracked codebase scale, not task cleverness** — telos is 20K LOC / 732 tests, auto-graph is 79K / 1,122 — so the grid ran on `ab1` (convert `enqueue` to a params object across ~34 call sites) and `ab3` (widen chapter-file zero-padding: 72 literal strings, four duplicated `padStart(2,'0')` sites, a filename regex). Pilot 6's tier result is therefore measured on one repo; that is a real limitation, not a footnote.
+
+Reported as **strict** success — build ∧ visible suite ∧ holdout — for reasons in Finding 17.
+
+| | `ab1` bare | `ab1` +harness | `ab3` bare | `ab3` +harness |
+|---|---|---|---|---|
+| haiku | 1/3 | 2/3 | 0/3 | 0/3 |
+| sonnet | **3/3** | **3/3** | 0/3 | 0/3 |
+| opus | **3/3** | **3/3** | 0/3 | 0/3 |
+
+**14. On volume tasks, tier substitutes for harness — and the expensive model is *cheaper*.** Bare haiku got `ab1` right once in three; the harness took it to 2/3; both frontier tiers went 3/3 with no scaffolding at all. The cost table is the part worth pinning up:
+
+| configuration | `ab1` strict | $/success |
+|---|---|---|
+| haiku bare | 1/3 | $6.20 |
+| haiku + full harness | 2/3 | $3.55 |
+| sonnet bare | 3/3 | $5.73 |
+| **opus bare** | **3/3** | **$2.43** |
+
+Opus was the cheapest *and* the most reliable, because capability shows up as **fewer turns**: median 350s versus haiku's 596s bare and 917s harnessed. Per-token price is not per-task price. This inverts the tempting reading of pilots 3–5 ("scaffold a cheap model") for this class of work: if the task is large and mechanical, buy the better model. Honest caveat: `ab1` is n=3 per cell, and frontier-vs-haiku bare on it is p=0.083 by Fisher — a clean direction, not a significant one.
+
+**15. On omission tasks, nothing substitutes for anything.** `ab3` went **0/18**: every tier, both arms, every rep. **17 of the 18 were silent failures** — the agent finished, the build compiled, the repo's full 1,122-test suite passed, and only the held-out assertions knew. Opus bare failed it identically to haiku bare. This is the study's flattest result and its most useful one: *there is a failure class where model capability and enforcement are both irrelevant.*
+
+**16. Diff review is structurally blind to omission — that's why nothing caught it.** Trace the layers on `ab3`. The compiler sees no error (each missed site still typechecks). The visible suite is green (the agent updated the nine test files to match its own incomplete change). The done-gate only runs tests, so it has nothing to block on. And the adversarial reviewer **approved** these diffs — including for sonnet and opus — because *a diff shows what changed, not what should have changed and didn't.* The three untouched prompt builders never appear in the diff, so there is nothing for a reviewer to react to. Every signal available to the agent and its harness is a presence-signal; the failure is an absence. The only artifact that caught it was an assertion written **before** the work, by someone who had already decided what completeness meant — which is the case for holdout suites, and in production for acceptance criteria fixed at planning time rather than inferred from the implementation.
+
+**17. Two more instrument findings, both caught by plausibility rather than by the scoring boolean.** (a) `success` never included **build**: vitest transpiles per-file and does not typecheck, so an agent can leave `pnpm build` broken and still pass the suite *and* the holdout. Three of 84 runs across pilots 5–6 did exactly that, including one that the done-gate passed and the reviewer approved. The definition was pre-registered and shared with pilot 5, so it was **not** changed mid-grid; `buildGreen` is recorded on every run and strict success is computed retroactively for both pilots (pilot 5: 63/72 strict vs 65 loose). (b) One run came back at $0.16 / 75s / 6 turns with zero files changed — the bench credentials had expired mid-run, and the failure was scored as a *model* failure. It is marked `run-invalidated` in the journal (retained for audit, excluded from analysis) and was re-executed after refreshing auth. Neither problem is visible in a success/failure column; both were found by asking whether a number was *plausible*. A grading pipeline needs its own smoke alarms.
+
+*Also noted:* all three `UNPARSEABLE` reviewer verdicts in pilot 6 came from **opus**, none from haiku or sonnet — the strongest model was the most likely to answer a JSON-contract request in prose.
+
 *Pilot 3 incident note:* the first L1:sonnet:FULL attempt exhausted the 16 GB host VM (12-worker vitest pool × CDK synth under a concurrent headless agent; no OOM-kill, full thrash). Reruns were memory-capped (worker pools + cgroup MemoryMax). The benchmark's own infrastructure OOM'ing the host is, fittingly, an operational-reality datum.
 
 ---
@@ -170,6 +207,7 @@ The variable that changed is **horizon**: minutes vs hours, one objective vs a t
 - **One author wrote the tasks, the holdouts, and the harness.** Pre-registration and published raw journals mitigate; they don't eliminate.
 - **Contamination:** both target repos were private during all graded runs and published afterward; task briefs are synthetic; model training cutoffs predate the repos' existence in public form.
 - **Two repos, both mine, both TypeScript/vitest monorepos.** Cross-repo consistency (telos 34/36, auto-graph 31/36) is reassuring but not external validity.
+- **Pilot 6 runs on one repo only.** Every telos task authored for it saturated for bare haiku (3/3 three times), so the tier comparison is measured entirely on auto-graph. Its `ab1` cells are n=3, and its headline tier contrast is p=0.083 — a direction, not a result.
 - **The production numbers are observational**, from one platform, and not independently auditable in this repo (the platform is company-owned). They motivate the horizon hypothesis; they don't prove it.
 - The reviewer/harness implementations are minimal clean-room versions of the production patterns, not the production code.
 
@@ -186,6 +224,7 @@ node runner/run-pilot3.mjs   # pilot 3 (12 hour-scale runs, ~$24)
 node runner/run-pilot4.mjs   # pilot 4 (24 planning-ablation runs, ~$30)
 git clone https://github.com/tdrml/auto-graph .pristine-autograph   # second target (pilot 5)
 node runner/run-pilot5.mjs   # pilot 5 (72 runs, two repos, ~$64)
+node runner/run-pilot6.mjs   # pilot 6 (36 runs, tier x enforcement, ~$121)
 ```
 
 Runners are sequential, resumable (JSONL journal is the source of truth), and kill-switched on summed API-equivalent cost.
