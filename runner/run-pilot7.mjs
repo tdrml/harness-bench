@@ -76,9 +76,14 @@ let globalCost = PRIOR_SPEND_USD;
 const epicsDone = new Set();
 const issuesDone = new Map(); // epicKey -> Set(issueId)
 if (existsSync(JOURNAL)) {
-  for (const line of readFileSync(JOURNAL, 'utf8').split('\n').filter(Boolean)) {
+  const lines = existsSync(JOURNAL) ? readFileSync(JOURNAL, 'utf8').split('\n').filter(Boolean) : [];
+  // Append-only invalidation: a later `invalidate` event voids an epic's earlier
+  // records without rewriting them. Journal lines are never edited or deleted.
+  const voided = new Set(lines.map((l) => JSON.parse(l)).filter((r) => r.event === 'invalidate').map((r) => r.epicKey));
+  for (const line of lines) {
     const rec = JSON.parse(line);
     if (rec.invalidated) continue; // excluded from resume + analysis, retained for audit
+    if (voided.has(rec.epicKey)) continue;
     if (rec.event === 'issue') {
       globalCost += rec.costUsd ?? 0;
       if (!issuesDone.has(rec.epicKey)) issuesDone.set(rec.epicKey, new Set());

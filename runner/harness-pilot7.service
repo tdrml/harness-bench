@@ -1,0 +1,34 @@
+[Unit]
+Description=harness-bench pilot 7 (epic-scale grid: tier x enforcement)
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/workspace/harness-bench
+ExecStart=%h/.nvm/versions/node/v24.15.0/bin/node runner/run-pilot7.mjs --smoke
+Restart=no
+
+# A systemd user service does not inherit the login shell's PATH, so nvm's node,
+# pnpm and the claude CLI are all invisible to it by default. The runner shells
+# out to all three; without this the grid dies at the first invocation.
+Environment=PATH=%h/.local/bin:%h/.local/share/pnpm:%h/.nvm/versions/node/v24.15.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=%h
+
+# The benchmark OOM'd a 16 GB host once already (pilot 3): a 12-worker vitest
+# pool plus a CDK synth under a concurrent headless agent, with no OOM killer.
+# Cap the whole grid in a cgroup so a runaway hits the limit instead of the host.
+MemoryMax=11G
+MemoryHigh=9G
+
+# Vitest worker caps belong to the runner too, but set them here so a manual
+# `systemctl --user start` gets the same bounds as the scripted path.
+Environment=VITEST_MAX_THREADS=4
+Environment=VITEST_MIN_THREADS=1
+Environment=VITEST_MAX_FORKS=4
+Environment=VITEST_MIN_FORKS=1
+
+StandardOutput=append:%h/workspace/harness-bench/results/pilot7.log
+StandardError=append:%h/workspace/harness-bench/results/pilot7.log
+
+[Install]
+WantedBy=default.target

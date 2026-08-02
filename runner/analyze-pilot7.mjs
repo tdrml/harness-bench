@@ -26,7 +26,9 @@ if (!existsSync(JOURNAL)) {
 }
 
 const recs = readFileSync(JOURNAL, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-const live = recs.filter((r) => !r.invalidated);
+// Append-only invalidation: an `invalidate` event voids that epic's records.
+const voided = new Set(recs.filter((r) => r.event === 'invalidate').map((r) => r.epicKey));
+const live = recs.filter((r) => !r.invalidated && !voided.has(r.epicKey));
 const issueRecs = live.filter((r) => r.event === 'issue' && r.rep !== 0);
 const epicRecs = live.filter((r) => r.event === 'epic' && r.rep !== 0);
 const invalidated = recs.filter((r) => r.invalidated);
