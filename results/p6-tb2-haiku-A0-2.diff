@@ -1,0 +1,263 @@
+diff --git a/packages/cdk/__tests__/__snapshots__/telos-stack.test.ts.snap b/packages/cdk/__tests__/__snapshots__/telos-stack.test.ts.snap
+index efbf99e..37a255c 100644
+--- a/packages/cdk/__tests__/__snapshots__/telos-stack.test.ts.snap
++++ b/packages/cdk/__tests__/__snapshots__/telos-stack.test.ts.snap
+@@ -407,7 +407,7 @@ exports[`TelosStack > matches the snapshot 1`] = `
+         },
+         "TableName": "telos-repo-locks",
+         "TimeToLiveSpecification": {
+-          "AttributeName": "ttl",
++          "AttributeName": "expiresAt",
+           "Enabled": true,
+         },
+       },
+@@ -517,7 +517,7 @@ exports[`TelosStack > matches the snapshot 1`] = `
+         },
+         "TableName": "telos-task-outputs",
+         "TimeToLiveSpecification": {
+-          "AttributeName": "ttl",
++          "AttributeName": "expiresAt",
+           "Enabled": true,
+         },
+       },
+diff --git a/packages/cdk/__tests__/telos-stack.test.ts b/packages/cdk/__tests__/telos-stack.test.ts
+index 90f8a24..8bbd21a 100644
+--- a/packages/cdk/__tests__/telos-stack.test.ts
++++ b/packages/cdk/__tests__/telos-stack.test.ts
+@@ -106,14 +106,14 @@ describe('TelosStack', () => {
+       TableName: 'telos-task-outputs',
+       KeySchema: [{ AttributeName: 'runId', KeyType: 'HASH' }],
+       BillingMode: 'PAY_PER_REQUEST',
+-      TimeToLiveSpecification: { AttributeName: 'ttl', Enabled: true },
++      TimeToLiveSpecification: { AttributeName: 'expiresAt', Enabled: true },
+     });
+ 
+     template.hasResourceProperties('AWS::DynamoDB::Table', {
+       TableName: 'telos-repo-locks',
+       KeySchema: [{ AttributeName: 'repoFullName', KeyType: 'HASH' }],
+       BillingMode: 'PAY_PER_REQUEST',
+-      TimeToLiveSpecification: { AttributeName: 'ttl', Enabled: true },
++      TimeToLiveSpecification: { AttributeName: 'expiresAt', Enabled: true },
+     });
+   });
+ 
+diff --git a/packages/cdk/lib/constructs/dynamodb-tables.ts b/packages/cdk/lib/constructs/dynamodb-tables.ts
+index c5c6387..41685b2 100644
+--- a/packages/cdk/lib/constructs/dynamodb-tables.ts
++++ b/packages/cdk/lib/constructs/dynamodb-tables.ts
+@@ -52,7 +52,7 @@ export class DynamoDbTables extends Construct {
+       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+       removalPolicy: cdk.RemovalPolicy.RETAIN,
+-      timeToLiveAttribute: 'ttl',
++      timeToLiveAttribute: 'expiresAt',
+     });
+ 
+     this.repoLocksTable = new dynamodb.Table(this, 'RepoLocksTable', {
+@@ -61,7 +61,7 @@ export class DynamoDbTables extends Construct {
+       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+       removalPolicy: cdk.RemovalPolicy.RETAIN,
+-      timeToLiveAttribute: 'ttl',
++      timeToLiveAttribute: 'expiresAt',
+     });
+ 
+     new cdk.CfnOutput(this, 'ProjectsTableArn', {
+diff --git a/packages/core/__tests__/dynamodb.test.ts b/packages/core/__tests__/dynamodb.test.ts
+index 3699ca6..1d7c109 100644
+--- a/packages/core/__tests__/dynamodb.test.ts
++++ b/packages/core/__tests__/dynamodb.test.ts
+@@ -402,12 +402,12 @@ describe('TaskOutputsService', () => {
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.Item.runId).toBe('run-1');
+     expect(cmd.input.Item.input).toEqual({ key: 'val' });
+-    expect(cmd.input.Item.ttl).toBeGreaterThanOrEqual(before + 86400);
+-    expect(cmd.input.Item.ttl).toBeLessThanOrEqual(after + 86400);
++    expect(cmd.input.Item.expiresAt).toBeGreaterThanOrEqual(before + 86400);
++    expect(cmd.input.Item.expiresAt).toBeLessThanOrEqual(after + 86400);
+   });
+ 
+   it('readInput returns the input field', async () => {
+-    const client = makeClient(() => ({ Item: { runId: 'run-1', input: { foo: 'bar' }, ttl: 0 } }));
++    const client = makeClient(() => ({ Item: { runId: 'run-1', input: { foo: 'bar' }, expiresAt: 0 } }));
+     const svc = new TaskOutputsService(client);
+     const result = await svc.readInput('run-1');
+     expect(result).toEqual({ foo: 'bar' });
+@@ -428,14 +428,14 @@ describe('TaskOutputsService', () => {
+     const after = Math.floor(Date.now() / 1000);
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+     expect(cmd.input.ExpressionAttributeValues[':output']).toEqual({ result: 'done' });
+-    const ttl = cmd.input.ExpressionAttributeValues[':ttl'] as number;
+-    expect(ttl).toBeGreaterThanOrEqual(before + 86400);
+-    expect(ttl).toBeLessThanOrEqual(after + 86400);
++    const expiresAt = cmd.input.ExpressionAttributeValues[':expiresAt'] as number;
++    expect(expiresAt).toBeGreaterThanOrEqual(before + 86400);
++    expect(expiresAt).toBeLessThanOrEqual(after + 86400);
+   });
+ 
+   it('readOutput returns the output field', async () => {
+     const client = makeClient(() => ({
+-      Item: { runId: 'run-1', output: { result: 'ok' }, ttl: 0 },
++      Item: { runId: 'run-1', output: { result: 'ok' }, expiresAt: 0 },
+     }));
+     const svc = new TaskOutputsService(client);
+     const result = await svc.readOutput('run-1');
+@@ -443,7 +443,7 @@ describe('TaskOutputsService', () => {
+   });
+ 
+   it('readOutput returns undefined when output not set', async () => {
+-    const client = makeClient(() => ({ Item: { runId: 'run-1', ttl: 0 } }));
++    const client = makeClient(() => ({ Item: { runId: 'run-1', expiresAt: 0 } }));
+     const svc = new TaskOutputsService(client);
+     const result = await svc.readOutput('run-1');
+     expect(result).toBeUndefined();
+@@ -467,9 +467,9 @@ describe('RepoLocksService', () => {
+     expect(cmd.input.Item.repoFullName).toBe('acme/app');
+     expect(cmd.input.Item.lockOwner).toBe('owner-1');
+     expect(cmd.input.ConditionExpression).toBe(
+-      'attribute_not_exists(repoFullName) OR #ttl < :now',
++      'attribute_not_exists(repoFullName) OR #expiresAt < :now',
+     );
+-    expect(cmd.input.ExpressionAttributeNames['#ttl']).toBe('ttl');
++    expect(cmd.input.ExpressionAttributeNames['#expiresAt']).toBe('expiresAt');
+   });
+ 
+   it('acquireLock sets TTL using REPO_LOCK_TTL_SECONDS from config', async () => {
+@@ -479,8 +479,8 @@ describe('RepoLocksService', () => {
+     await svc.acquireLock('acme/app', 'owner-1');
+     const after = Math.floor(Date.now() / 1000);
+     const cmd = (client.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+-    expect(cmd.input.Item.ttl).toBeGreaterThanOrEqual(before + 1800);
+-    expect(cmd.input.Item.ttl).toBeLessThanOrEqual(after + 1800);
++    expect(cmd.input.Item.expiresAt).toBeGreaterThanOrEqual(before + 1800);
++    expect(cmd.input.Item.expiresAt).toBeLessThanOrEqual(after + 1800);
+   });
+ 
+   it('acquireLock throws LockConflictError when condition fails', async () => {
+@@ -520,7 +520,7 @@ describe('RepoLocksService', () => {
+   });
+ 
+   it('getLock returns the lock item', async () => {
+-    const lock = { repoFullName: 'acme/app', lockOwner: 'o', ttl: 9999999999, acquiredAt: 'x' };
++    const lock = { repoFullName: 'acme/app', lockOwner: 'o', expiresAt: 9999999999, acquiredAt: 'x' };
+     const client = makeClient(() => ({ Item: lock }));
+     const svc = new RepoLocksService(client);
+     const result = await svc.getLock('acme/app');
+@@ -535,9 +535,9 @@ describe('RepoLocksService', () => {
+   });
+ 
+   it('isLocked returns true when lock exists and not expired', async () => {
+-    const ttl = Math.floor(Date.now() / 1000) + 1800;
++    const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+     const client = makeClient(() => ({
+-      Item: { repoFullName: 'acme/app', lockOwner: 'o', ttl, acquiredAt: 'x' },
++      Item: { repoFullName: 'acme/app', lockOwner: 'o', expiresAt, acquiredAt: 'x' },
+     }));
+     const svc = new RepoLocksService(client);
+     const result = await svc.isLocked('acme/app');
+@@ -545,9 +545,9 @@ describe('RepoLocksService', () => {
+   });
+ 
+   it('isLocked returns false when lock is expired', async () => {
+-    const ttl = Math.floor(Date.now() / 1000) - 100;
++    const expiresAt = Math.floor(Date.now() / 1000) - 100;
+     const client = makeClient(() => ({
+-      Item: { repoFullName: 'acme/app', lockOwner: 'o', ttl, acquiredAt: 'x' },
++      Item: { repoFullName: 'acme/app', lockOwner: 'o', expiresAt, acquiredAt: 'x' },
+     }));
+     const svc = new RepoLocksService(client);
+     const result = await svc.isLocked('acme/app');
+diff --git a/packages/core/src/dynamodb/repo-locks.ts b/packages/core/src/dynamodb/repo-locks.ts
+index e591d53..5c2fe0c 100644
+--- a/packages/core/src/dynamodb/repo-locks.ts
++++ b/packages/core/src/dynamodb/repo-locks.ts
+@@ -19,12 +19,12 @@ export class RepoLocksService {
+   async acquireLock(repoFullName: string, lockOwner: string): Promise<void> {
+     const config = getConfig();
+     const now = Math.floor(Date.now() / 1000);
+-    const ttl = now + config.REPO_LOCK_TTL_SECONDS;
++    const expiresAt = now + config.REPO_LOCK_TTL_SECONDS;
+ 
+     const item: RepoLock = {
+       repoFullName,
+       lockOwner,
+-      ttl,
++      expiresAt,
+       acquiredAt: new Date().toISOString(),
+     };
+ 
+@@ -33,8 +33,8 @@ export class RepoLocksService {
+         new PutCommand({
+           TableName: this.tableName,
+           Item: item,
+-          ConditionExpression: 'attribute_not_exists(repoFullName) OR #ttl < :now',
+-          ExpressionAttributeNames: { '#ttl': 'ttl' },
++          ConditionExpression: 'attribute_not_exists(repoFullName) OR #expiresAt < :now',
++          ExpressionAttributeNames: { '#expiresAt': 'expiresAt' },
+           ExpressionAttributeValues: { ':now': now },
+         }),
+       );
+@@ -84,6 +84,6 @@ export class RepoLocksService {
+     const lock = await this.getLock(repoFullName);
+     if (!lock) return false;
+     const now = Math.floor(Date.now() / 1000);
+-    return lock.ttl >= now;
++    return lock.expiresAt >= now;
+   }
+ }
+diff --git a/packages/core/src/dynamodb/task-outputs.ts b/packages/core/src/dynamodb/task-outputs.ts
+index 67a7f8a..c853af4 100644
+--- a/packages/core/src/dynamodb/task-outputs.ts
++++ b/packages/core/src/dynamodb/task-outputs.ts
+@@ -21,11 +21,11 @@ export class TaskOutputsService {
+   }
+ 
+   async writeInput(runId: string, input: Record<string, unknown>): Promise<void> {
+-    const ttl = this.ttl();
++    const expiresAt = this.ttl();
+     await this.client.send(
+       new PutCommand({
+         TableName: this.tableName,
+-        Item: { runId, input, ttl } satisfies TaskOutput,
++        Item: { runId, input, expiresAt } satisfies TaskOutput,
+       }),
+     );
+   }
+@@ -41,14 +41,14 @@ export class TaskOutputsService {
+   }
+ 
+   async writeOutput(runId: string, output: Record<string, unknown>): Promise<void> {
+-    const ttl = this.ttl();
++    const expiresAt = this.ttl();
+     await this.client.send(
+       new UpdateCommand({
+         TableName: this.tableName,
+         Key: { runId },
+-        UpdateExpression: 'SET #output = :output, #ttl = :ttl',
+-        ExpressionAttributeNames: { '#output': 'output', '#ttl': 'ttl' },
+-        ExpressionAttributeValues: { ':output': output, ':ttl': ttl },
++        UpdateExpression: 'SET #output = :output, #expiresAt = :expiresAt',
++        ExpressionAttributeNames: { '#output': 'output', '#expiresAt': 'expiresAt' },
++        ExpressionAttributeValues: { ':output': output, ':expiresAt': expiresAt },
+       }),
+     );
+   }
+diff --git a/packages/core/src/dynamodb/types.ts b/packages/core/src/dynamodb/types.ts
+index 17fa781..7db9197 100644
+--- a/packages/core/src/dynamodb/types.ts
++++ b/packages/core/src/dynamodb/types.ts
+@@ -43,12 +43,12 @@ export interface TaskOutput {
+   runId: string;
+   input?: Record<string, unknown>;
+   output?: Record<string, unknown>;
+-  ttl: number;
++  expiresAt: number;
+ }
+ 
+ export interface RepoLock {
+   repoFullName: string;
+   lockOwner: string;
+-  ttl: number;
++  expiresAt: number;
+   acquiredAt: string;
+ }

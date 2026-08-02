@@ -1,0 +1,549 @@
+diff --git a/packages/core/src/prompts/__tests__/prompts.test.ts b/packages/core/src/prompts/__tests__/prompts.test.ts
+index 15c9015..b0ee693 100644
+--- a/packages/core/src/prompts/__tests__/prompts.test.ts
++++ b/packages/core/src/prompts/__tests__/prompts.test.ts
+@@ -261,7 +261,7 @@ describe('buildWriterPrompt', () => {
+ 
+   it('includes the correct zero-padded chapter file path', () => {
+     const result = buildWriterPrompt(params);
+-    expect(result).toContain('manuscript/chapter-05.md');
++    expect(result).toContain('manuscript/chapter-005.md');
+   });
+ 
+   it('includes the word count target', () => {
+@@ -326,7 +326,7 @@ describe('buildWriterPrompt', () => {
+ 
+   it('handles double-digit chapter numbers correctly', () => {
+     const result = buildWriterPrompt({ ...params, chapterNumber: 12 });
+-    expect(result).toContain('manuscript/chapter-12.md');
++    expect(result).toContain('manuscript/chapter-012.md');
+     expect(result).toContain('Chapter 12');
+   });
+ });
+@@ -363,7 +363,7 @@ describe('buildEditorPrompt', () => {
+ 
+   it('references the chapter file to review', () => {
+     const result = buildEditorPrompt(params);
+-    expect(result).toContain('manuscript/chapter-05.md');
++    expect(result).toContain('manuscript/chapter-005.md');
+   });
+ 
+   it('references the master outline file', () => {
+@@ -428,7 +428,7 @@ describe('buildEditorPrompt', () => {
+ 
+   it('handles double-digit chapter numbers correctly', () => {
+     const result = buildEditorPrompt({ ...params, chapterNumber: 12 });
+-    expect(result).toContain('manuscript/chapter-12.md');
++    expect(result).toContain('manuscript/chapter-012.md');
+   });
+ 
+   it('includes shared guard rails', () => {
+@@ -482,7 +482,7 @@ describe('buildReviserPrompt', () => {
+ 
+   it('references the chapter file to revise', () => {
+     const result = buildReviserPrompt(params);
+-    expect(result).toContain('manuscript/chapter-05.md');
++    expect(result).toContain('manuscript/chapter-005.md');
+   });
+ 
+   it('references the master outline file', () => {
+@@ -507,13 +507,13 @@ describe('buildReviserPrompt', () => {
+ 
+   it('includes the zero-padded chapter file path in git instructions', () => {
+     const result = buildReviserPrompt(params);
+-    expect(result).toContain('manuscript/chapter-05.md');
++    expect(result).toContain('manuscript/chapter-005.md');
+     expect(result).not.toContain('<chapter-file>');
+   });
+ 
+   it('handles double-digit chapter numbers correctly', () => {
+     const result = buildReviserPrompt({ ...params, chapterNumber: 12 });
+-    expect(result).toContain('manuscript/chapter-12.md');
++    expect(result).toContain('manuscript/chapter-012.md');
+   });
+ 
+   it('includes shared guard rails', () => {
+@@ -549,7 +549,7 @@ describe('buildContinuityCheckerPrompt', () => {
+ 
+   it('references the chapter file to audit', () => {
+     const result = buildContinuityCheckerPrompt(params);
+-    expect(result).toContain('manuscript/chapter-03.md');
++    expect(result).toContain('manuscript/chapter-003.md');
+   });
+ 
+   it('references the character bible file', () => {
+@@ -588,7 +588,7 @@ describe('buildContinuityCheckerPrompt', () => {
+ 
+   it('references zero-padded continuity report file', () => {
+     const result = buildContinuityCheckerPrompt(params);
+-    expect(result).toContain('continuity-report-chapter-03.md');
++    expect(result).toContain('continuity-report-chapter-003.md');
+   });
+ 
+   it('includes audit categories', () => {
+@@ -613,18 +613,18 @@ describe('buildContinuityCheckerPrompt', () => {
+ 
+   it('handles single-digit chapter numbers with zero-padding in file paths', () => {
+     const result = buildContinuityCheckerPrompt({ ...params, chapterNumber: 7 });
+-    expect(result).toContain('continuity-report-chapter-07.md');
++    expect(result).toContain('continuity-report-chapter-007.md');
+   });
+ 
+   it('handles double-digit chapter numbers correctly', () => {
+     const result = buildContinuityCheckerPrompt({ ...params, chapterNumber: 15 });
+-    expect(result).toContain('continuity-report-chapter-15.md');
++    expect(result).toContain('continuity-report-chapter-015.md');
+     expect(result).toContain('Chapter 15');
+   });
+ 
+   it('instructs creation of a chapter summary file', () => {
+     const result = buildContinuityCheckerPrompt(params);
+-    expect(result).toContain('notes/chapter-03-summary.md');
++    expect(result).toContain('notes/chapter-003-summary.md');
+   });
+ 
+   it('includes summary writing guidelines', () => {
+@@ -636,7 +636,7 @@ describe('buildContinuityCheckerPrompt', () => {
+ 
+   it('includes summary file in git add command', () => {
+     const result = buildContinuityCheckerPrompt(params);
+-    expect(result).toContain('git add notes/continuity-report-chapter-03.md notes/continuity-delta.json notes/chapter-03-summary.md');
++    expect(result).toContain('git add notes/continuity-report-chapter-003.md notes/continuity-delta.json notes/chapter-003-summary.md');
+   });
+ });
+ 
+@@ -1380,7 +1380,7 @@ describe('buildWriterPrompt — non-fiction gate', () => {
+ 
+   it('non-fiction writer preserves shared scaffolding (chapter file path, word count, completion, gh pr create)', () => {
+     const result = buildWriterPrompt({ ...baseParams, projectType: ProjectType.NON_FICTION });
+-    expect(result).toContain('manuscript/chapter-05.md');
++    expect(result).toContain('manuscript/chapter-005.md');
+     expect(result).toContain('4,000');
+     expect(result).toContain('gh pr create');
+     expect(result).toContain('Guard Rails');
+@@ -1425,7 +1425,7 @@ describe('buildReviserPrompt — non-fiction gate', () => {
+ 
+   it('non-fiction reviser preserves shared scaffolding', () => {
+     const result = buildReviserPrompt({ ...baseParams, projectType: ProjectType.NON_FICTION });
+-    expect(result).toContain('manuscript/chapter-05.md');
++    expect(result).toContain('manuscript/chapter-005.md');
+     expect(result).toContain('round 1');
+     expect(result).toContain('Guard Rails');
+   });
+@@ -1476,8 +1476,8 @@ describe('buildContinuityCheckerPrompt — non-fiction gate', () => {
+   it('non-fiction continuity-checker preserves shared scaffolding and file paths', () => {
+     const result = buildContinuityCheckerPrompt({ ...baseParams, projectType: ProjectType.NON_FICTION });
+     expect(result).toContain('continuity-delta.json');
+-    expect(result).toContain('continuity-report-chapter-05.md');
+-    expect(result).toContain('notes/chapter-05-summary.md');
++    expect(result).toContain('continuity-report-chapter-005.md');
++    expect(result).toContain('notes/chapter-005-summary.md');
+     expect(result).toContain('Guard Rails');
+   });
+ });
+@@ -1693,7 +1693,7 @@ describe('buildEditorPrompt — round-aware severity threshold', () => {
+     for (const round of [0, 2, 3, 4, 5, 8]) {
+       const result = buildEditorPrompt({ ...baseParams, revisionRound: round });
+       expect(result).toContain('Guard Rails');
+-      expect(result).toContain('manuscript/chapter-01.md');
++      expect(result).toContain('manuscript/chapter-001.md');
+       expect(result).toContain('gh pr review 42');
+       expect(result).toContain('VERDICT: APPROVE');
+       expect(result).toContain('VERDICT: REQUEST_CHANGES');
+diff --git a/packages/core/src/prompts/continuity-checker.ts b/packages/core/src/prompts/continuity-checker.ts
+index 2a8835c..348d42a 100644
+--- a/packages/core/src/prompts/continuity-checker.ts
++++ b/packages/core/src/prompts/continuity-checker.ts
+@@ -282,7 +282,7 @@ export function buildContinuityCheckerPrompt(params: ContinuityCheckerPromptPara
+   const { chapterNumber, existingContinuityState, projectType, seriesBookNumber } = params;
+   const prunedState = pruneContinuityState(existingContinuityState);
+ 
+-  const paddedChapter = String(chapterNumber).padStart(2, '0');
++  const paddedChapter = String(chapterNumber).padStart(3, '0');
+   const isNonFiction = projectType === ProjectType.NON_FICTION;
+ 
+   const auditAndDeltaBlock = isNonFiction
+diff --git a/packages/core/src/prompts/editor.ts b/packages/core/src/prompts/editor.ts
+index f9e1dbc..e408fc3 100644
+--- a/packages/core/src/prompts/editor.ts
++++ b/packages/core/src/prompts/editor.ts
+@@ -131,7 +131,7 @@ export function buildEditorPrompt(params: EditorPromptParams): string {
+     revisionRound = 0,
+   } = params;
+   const prunedState = pruneContinuityState(continuityState);
+-  const paddedChapter = String(chapterNumber).padStart(2, '0');
++  const paddedChapter = String(chapterNumber).padStart(3, '0');
+ 
+   const isNonFiction = projectType === ProjectType.NON_FICTION;
+   const band = classifyRound(revisionRound);
+diff --git a/packages/core/src/prompts/reviser.ts b/packages/core/src/prompts/reviser.ts
+index f527acd..0e05d26 100644
+--- a/packages/core/src/prompts/reviser.ts
++++ b/packages/core/src/prompts/reviser.ts
+@@ -14,7 +14,7 @@ export interface ReviserPromptParams {
+ export function buildReviserPrompt(params: ReviserPromptParams): string {
+   const { reviewComments, style, wordCountTarget, revisionRound, chapterNumber, projectType } = params;
+ 
+-  const paddedChapter = String(chapterNumber).padStart(2, '0');
++  const paddedChapter = String(chapterNumber).padStart(3, '0');
+   const chapterFile = `manuscript/chapter-${paddedChapter}.md`;
+   const isNonFiction = projectType === ProjectType.NON_FICTION;
+ 
+diff --git a/packages/core/src/prompts/writer.ts b/packages/core/src/prompts/writer.ts
+index a1a3f47..8c95137 100644
+--- a/packages/core/src/prompts/writer.ts
++++ b/packages/core/src/prompts/writer.ts
+@@ -200,7 +200,7 @@ export function buildWriterPrompt(params: WriterPromptParams): string {
+   } = params;
+   const prunedState = pruneContinuityState(continuityState);
+ 
+-  const paddedChapter = String(chapterNumber).padStart(2, '0');
++  const paddedChapter = String(chapterNumber).padStart(3, '0');
+   const chapterFile = `manuscript/chapter-${paddedChapter}.md`;
+ 
+   const isNonFiction = projectType === ProjectType.NON_FICTION;
+diff --git a/packages/core/src/templates/scaffold-files.ts b/packages/core/src/templates/scaffold-files.ts
+index 2517139..7aa49aa 100644
+--- a/packages/core/src/templates/scaffold-files.ts
++++ b/packages/core/src/templates/scaffold-files.ts
+@@ -710,7 +710,7 @@ This document covers converting the manuscript from markdown chapters into publi
+ │   └── generate_audiobook.py  # Gemini Pro TTS audiobook generation script
+ ├── manuscript/
+ │   ├── frontmatter.md         # Copyright page
+-│   ├── chapter-01.md
++│   ├── chapter-001.md
+ │   ...
+ │   └── chapter-NN.md
+ │   └── backmatter.md          # Author note + review request
+@@ -779,7 +779,7 @@ Generate an audiobook using Gemini Pro TTS:
+ 
+ \\\`\\\`\\\`bash
+ # Single chapter
+-python3 scripts/generate_audiobook.py manuscript/chapter-01.md
++python3 scripts/generate_audiobook.py manuscript/chapter-001.md
+ 
+ # All chapters (parallel)
+ python3 scripts/generate_audiobook.py manuscript/chapter-*.md --parallel 3
+diff --git a/packages/core/src/writing/__tests__/writing.test.ts b/packages/core/src/writing/__tests__/writing.test.ts
+index f2bc211..18487ba 100644
+--- a/packages/core/src/writing/__tests__/writing.test.ts
++++ b/packages/core/src/writing/__tests__/writing.test.ts
+@@ -332,15 +332,15 @@ describe('parseChapterMarkdown', () => {
+ 
+ describe('getChapterFilePath', () => {
+   it('zero-pads single-digit chapters', () => {
+-    expect(getChapterFilePath(3)).toBe('manuscript/chapter-03.md');
++    expect(getChapterFilePath(3)).toBe('manuscript/chapter-003.md');
+   });
+ 
+-  it('does not pad two-digit chapters', () => {
+-    expect(getChapterFilePath(12)).toBe('manuscript/chapter-12.md');
++  it('zero-pads two-digit chapters', () => {
++    expect(getChapterFilePath(12)).toBe('manuscript/chapter-012.md');
+   });
+ 
+   it('returns correct path for chapter 1', () => {
+-    expect(getChapterFilePath(1)).toBe('manuscript/chapter-01.md');
++    expect(getChapterFilePath(1)).toBe('manuscript/chapter-001.md');
+   });
+ });
+ 
+diff --git a/packages/core/src/writing/paths.ts b/packages/core/src/writing/paths.ts
+index 3cf6753..19cb219 100644
+--- a/packages/core/src/writing/paths.ts
++++ b/packages/core/src/writing/paths.ts
+@@ -1,3 +1,3 @@
+ export function getChapterFilePath(chapterNumber: number): string {
+-  return `manuscript/chapter-${String(chapterNumber).padStart(2, '0')}.md`;
++  return `manuscript/chapter-${String(chapterNumber).padStart(3, '0')}.md`;
+ }
+diff --git a/packages/lambdas/src/__tests__/integration/continuity.test.ts b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+index aab8b67..2988ee2 100644
+--- a/packages/lambdas/src/__tests__/integration/continuity.test.ts
++++ b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+@@ -80,8 +80,8 @@ beforeEach(() => {
+   resetQueue();
+   resetMockGitHub();
+ 
+-  fileContents.set('manuscript/chapter-01.md', MOCK_CHAPTER_CONTENT);
+-  fileContents.set('manuscript/chapter-02.md', MOCK_CHAPTER_CONTENT);
++  fileContents.set('manuscript/chapter-001.md', MOCK_CHAPTER_CONTENT);
++  fileContents.set('manuscript/chapter-002.md', MOCK_CHAPTER_CONTENT);
+   fileContents.set('notes/continuity-state.json', MOCK_CONTINUITY_STATE);
+ });
+ 
+@@ -253,7 +253,7 @@ describe('Continuity state propagation', () => {
+     );
+ 
+     // Seed mock GitHub for chapter 2 content
+-    fileContents.set('manuscript/chapter-02.md', MOCK_CHAPTER_CONTENT);
++    fileContents.set('manuscript/chapter-002.md', MOCK_CHAPTER_CONTENT);
+     mockGitHub.listPullRequests.mockResolvedValue([
+       {
+         number: 8,
+diff --git a/packages/lambdas/src/__tests__/integration/escalation.test.ts b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+index 786d7d5..b1f2145 100644
+--- a/packages/lambdas/src/__tests__/integration/escalation.test.ts
++++ b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+@@ -76,7 +76,7 @@ beforeEach(() => {
+   resetStore();
+   resetQueue();
+   resetMockGitHub();
+-  fileContents.set('manuscript/chapter-01.md', MOCK_CHAPTER_CONTENT);
++  fileContents.set('manuscript/chapter-001.md', MOCK_CHAPTER_CONTENT);
+ });
+ 
+ describe('Escalation (maxRevisionRounds exceeded)', () => {
+diff --git a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+index 94efdd5..64a98f9 100644
+--- a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
++++ b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+@@ -84,7 +84,7 @@ beforeEach(() => {
+ 
+   // Seed GitHub file contents used by reconcile/handlers
+   fileContents.set('notes/task-graph.json', SINGLE_CHAPTER_TASK_GRAPH_JSON);
+-  fileContents.set('manuscript/chapter-01.md', MOCK_CHAPTER_CONTENT);
++  fileContents.set('manuscript/chapter-001.md', MOCK_CHAPTER_CONTENT);
+   fileContents.set('notes/continuity-state.json', MOCK_CONTINUITY_STATE);
+ });
+ 
+diff --git a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+index dcd9217..a8fb27d 100644
+--- a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
++++ b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+@@ -77,7 +77,7 @@ beforeEach(() => {
+   resetQueue();
+   resetMockGitHub();
+ 
+-  fileContents.set('manuscript/chapter-01.md', MOCK_CHAPTER_CONTENT);
++  fileContents.set('manuscript/chapter-001.md', MOCK_CHAPTER_CONTENT);
+ 
+   // Seed store: project + task graph with one PENDING chapter
+   store.projects.set(PROJECT_ID, makeProjectItem({ status: 'WRITING' }));
+diff --git a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+index f6c9882..05bd9f3 100644
+--- a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
++++ b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+@@ -82,7 +82,7 @@ beforeEach(() => {
+ describe('Word count gate', () => {
+   it('re-enqueues TRIGGER_CHAPTER when word count is below minimum', async () => {
+     // Set short chapter content (100 words, below reconcile's 270-word minimum)
+-    fileContents.set('manuscript/chapter-01.md', MOCK_SHORT_CHAPTER_CONTENT);
++    fileContents.set('manuscript/chapter-001.md', MOCK_SHORT_CHAPTER_CONTENT);
+ 
+     // Trigger chapter: acquires lock, launches writer ECS, enqueues RECONCILE
+     await dispatch({
+@@ -106,7 +106,7 @@ describe('Word count gate', () => {
+   });
+ 
+   it('does NOT enqueue REVIEW_CHAPTER when word count fails', async () => {
+-    fileContents.set('manuscript/chapter-01.md', MOCK_SHORT_CHAPTER_CONTENT);
++    fileContents.set('manuscript/chapter-001.md', MOCK_SHORT_CHAPTER_CONTENT);
+ 
+     await dispatch({
+       type: 'TRIGGER_CHAPTER',
+@@ -125,7 +125,7 @@ describe('Word count gate', () => {
+ 
+   it('proceeds to REVIEW_CHAPTER when word count is valid', async () => {
+     // Use valid chapter content (300 words)
+-    fileContents.set('manuscript/chapter-01.md', MOCK_CHAPTER_CONTENT);
++    fileContents.set('manuscript/chapter-001.md', MOCK_CHAPTER_CONTENT);
+ 
+     await dispatch({
+       type: 'TRIGGER_CHAPTER',
+@@ -143,7 +143,7 @@ describe('Word count gate', () => {
+   });
+ 
+   it('preserves the node ID in the re-triggered TRIGGER_CHAPTER work item', async () => {
+-    fileContents.set('manuscript/chapter-01.md', MOCK_SHORT_CHAPTER_CONTENT);
++    fileContents.set('manuscript/chapter-001.md', MOCK_SHORT_CHAPTER_CONTENT);
+ 
+     await dispatch({
+       type: 'TRIGGER_CHAPTER',
+@@ -164,7 +164,7 @@ describe('Word count gate', () => {
+     // For this test: simulate a MERGE_CHAPTER attempt with under-count content.
+     // merge-chapter uses 20% tolerance: min=240, max=360 for target=300.
+     // 100-word content still fails the 20% check (100 < 240).
+-    fileContents.set('manuscript/chapter-01.md', MOCK_SHORT_CHAPTER_CONTENT);
++    fileContents.set('manuscript/chapter-001.md', MOCK_SHORT_CHAPTER_CONTENT);
+ 
+     // Seed node with PR number (as if writer and editor steps already ran)
+     const node = makeChapterNode(NODE_ID, 1, {
+diff --git a/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
+index f9c9e20..6d82932 100644
+--- a/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
+@@ -210,7 +210,7 @@ describe('MERGE_CHAPTER — merge ready', () => {
+     await handler(event, {} as never, () => {});
+     expect(mockGitHubClientMethods.getFileContent).toHaveBeenCalledWith(
+       { owner: 'test-org', repo: 'the-dark-tower' },
+-      'manuscript/chapter-01.md',
++      'manuscript/chapter-001.md',
+       'chapter-01',
+     );
+   });
+diff --git a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+index 0326a0d..407d7d0 100644
+--- a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+@@ -660,7 +660,7 @@ describe('RECONCILE — writer success (valid word count)', () => {
+ 
+     expect(mockGitHubClientMethods.getFileContent).toHaveBeenCalledWith(
+       { owner: 'test-org', repo: 'the-dark-tower' },
+-      'manuscript/chapter-01.md',
++      'manuscript/chapter-001.md',
+       'chapter-01',
+     );
+   });
+diff --git a/packages/lambdas/src/handlers/final-review.ts b/packages/lambdas/src/handlers/final-review.ts
+index 276a80e..de46d35 100644
+--- a/packages/lambdas/src/handlers/final-review.ts
++++ b/packages/lambdas/src/handlers/final-review.ts
+@@ -45,7 +45,7 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     }
+ 
+     // Fallback: read the chapter file from main and count words
+-    const paddedChapter = String(node.chapterNumber).padStart(2, '0');
++    const paddedChapter = String(node.chapterNumber).padStart(3, '0');
+     try {
+       const file = await github.getFileContent(
+         repo,
+diff --git a/packages/lambdas/src/handlers/merge-chapter.ts b/packages/lambdas/src/handlers/merge-chapter.ts
+index 5159b6f..15d9fd3 100644
+--- a/packages/lambdas/src/handlers/merge-chapter.ts
++++ b/packages/lambdas/src/handlers/merge-chapter.ts
+@@ -92,8 +92,9 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   const github = createGitHubClient(config.GITHUB_TOKEN, logger);
+   const repo = { owner: config.GITHUB_ORG, repo: project.repoName };
+ 
+-  const paddedChapter = String(node.chapterNumber).padStart(2, '0');
+-  const branchName = `chapter-${paddedChapter}`;
++  const paddedChapter = String(node.chapterNumber).padStart(3, '0');
++  const branchPaddedChapter = String(node.chapterNumber).padStart(2, '0');
++  const branchName = `chapter-${branchPaddedChapter}`;
+ 
+   const [chapterFile, reviews, prComments] = await Promise.all([
+     github.getFileContent(repo, `manuscript/chapter-${paddedChapter}.md`, branchName),
+diff --git a/packages/lambdas/src/handlers/rate-limit-recovery.ts b/packages/lambdas/src/handlers/rate-limit-recovery.ts
+index 05db964..c6b9804 100644
+--- a/packages/lambdas/src/handlers/rate-limit-recovery.ts
++++ b/packages/lambdas/src/handlers/rate-limit-recovery.ts
+@@ -267,8 +267,9 @@ async function lookupPrNumber(
+   if (!project) throw new Error(`Project not found: ${projectId}`);
+ 
+   const repo = { owner: config.GITHUB_ORG, repo: project.repoName };
+-  const paddedChapter = String(chapterNumber).padStart(2, '0');
+-  const branchName = `chapter-${paddedChapter}`;
++  const paddedChapter = String(chapterNumber).padStart(3, '0');
++  const branchPaddedChapter = String(chapterNumber).padStart(2, '0');
++  const branchName = `chapter-${branchPaddedChapter}`;
+ 
+   const prs = await github.listPullRequests(repo, branchName);
+   if (prs.length === 0) throw new Error(`No open PR found for branch: ${branchName}`);
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 8e2e77f..9c9f382 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -111,8 +111,9 @@ async function reEnqueueForRetry(
+   logger: Logger,
+   sourceRunId: string,
+ ): Promise<boolean> {
+-  const paddedChapter = String(node.chapterNumber).padStart(2, '0');
+-  const branchName = `chapter-${paddedChapter}`;
++  const paddedChapter = String(node.chapterNumber).padStart(3, '0');
++  const branchPaddedChapter = String(node.chapterNumber).padStart(2, '0');
++  const branchName = `chapter-${branchPaddedChapter}`;
+ 
+   switch (workerType) {
+     case 'writer': {
+@@ -719,8 +720,9 @@ async function runReconcile(
+       const node = taskGraph.nodes.find((n) => n.nodeId === nodeId);
+       if (!node) throw new Error(`Node not found: ${nodeId}`);
+ 
+-      const paddedChapter = String(node.chapterNumber).padStart(2, '0');
+-      const branchName = `chapter-${paddedChapter}`;
++      const paddedChapter = String(node.chapterNumber).padStart(3, '0');
++      const branchPaddedChapter = String(node.chapterNumber).padStart(2, '0');
++      const branchName = `chapter-${branchPaddedChapter}`;
+ 
+       const prs = await github.listPullRequests(repo, branchName);
+       if (prs.length === 0) {
+@@ -823,8 +825,9 @@ async function runReconcile(
+       const node = taskGraph.nodes.find((n) => n.nodeId === nodeId);
+       if (!node) throw new Error(`Node not found: ${nodeId}`);
+ 
+-      const paddedChapter = String(node.chapterNumber).padStart(2, '0');
+-      const branchName = `chapter-${paddedChapter}`;
++      const paddedChapter = String(node.chapterNumber).padStart(3, '0');
++      const branchPaddedChapter = String(node.chapterNumber).padStart(2, '0');
++      const branchName = `chapter-${branchPaddedChapter}`;
+ 
+       const prs = await github.listPullRequests(repo, branchName);
+       if (prs.length === 0) {
+@@ -937,8 +940,9 @@ async function runReconcile(
+       const node = taskGraph.nodes.find((n) => n.nodeId === nodeId);
+       if (!node) throw new Error(`Node not found: ${nodeId}`);
+ 
+-      const paddedChapter = String(node.chapterNumber).padStart(2, '0');
+-      const branchName = `chapter-${paddedChapter}`;
++      const paddedChapter = String(node.chapterNumber).padStart(3, '0');
++      const branchPaddedChapter = String(node.chapterNumber).padStart(2, '0');
++      const branchName = `chapter-${branchPaddedChapter}`;
+ 
+       const prs = await github.listPullRequests(repo, branchName);
+       if (prs.length === 0) {
+diff --git a/packages/lambdas/src/handlers/review-chapter.ts b/packages/lambdas/src/handlers/review-chapter.ts
+index 8adb20f..8a9c5db 100644
+--- a/packages/lambdas/src/handlers/review-chapter.ts
++++ b/packages/lambdas/src/handlers/review-chapter.ts
+@@ -55,8 +55,9 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     throw new Error(`Node not found: ${nodeId}`);
+   }
+ 
+-  const paddedChapter = String(node.chapterNumber).padStart(2, '0');
+-  const branchName = `chapter-${paddedChapter}`;
++  const paddedChapter = String(node.chapterNumber).padStart(3, '0');
++  const branchPaddedChapter = String(node.chapterNumber).padStart(2, '0');
++  const branchName = `chapter-${branchPaddedChapter}`;
+ 
+   // Load continuity state from repo (written by continuity-checker after each merge)
+   let continuityState: ContinuityState = EMPTY_CONTINUITY_STATE;
+diff --git a/packages/lambdas/src/handlers/revise-chapter.ts b/packages/lambdas/src/handlers/revise-chapter.ts
+index 3dd525a..40fc8b5 100644
+--- a/packages/lambdas/src/handlers/revise-chapter.ts
++++ b/packages/lambdas/src/handlers/revise-chapter.ts
+@@ -74,8 +74,9 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     return;
+   }
+ 
+-  const paddedChapter = String(node.chapterNumber).padStart(2, '0');
+-  const branchName = `chapter-${paddedChapter}`;
++  const paddedChapter = String(node.chapterNumber).padStart(3, '0');
++  const branchPaddedChapter = String(node.chapterNumber).padStart(2, '0');
++  const branchName = `chapter-${branchPaddedChapter}`;
+ 
+   const wordCountTarget = Math.floor(
+     project.config.targetWordCount / project.config.chapterCount,
+diff --git a/packages/lambdas/src/handlers/trigger-chapter.ts b/packages/lambdas/src/handlers/trigger-chapter.ts
+index cc7047c..0e2304e 100644
+--- a/packages/lambdas/src/handlers/trigger-chapter.ts
++++ b/packages/lambdas/src/handlers/trigger-chapter.ts
+@@ -114,7 +114,8 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     return;
+   }
+ 
+-  const paddedChapter = String(chapterNumber).padStart(2, '0');
++  const paddedChapter = String(chapterNumber).padStart(3, '0');
++  const branchPaddedChapter = String(chapterNumber).padStart(2, '0');
+ 
+   const runId = ulid();
+   const now = new Date().toISOString();
+@@ -135,7 +136,7 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+       PROJECT_ID: projectId,
+       REPO_NAME: project.repoName,
+       CHAPTER_NUMBER: String(chapterNumber),
+-      BRANCH_NAME: `chapter-${paddedChapter}`,
++      BRANCH_NAME: `chapter-${branchPaddedChapter}`,
+       ISSUE_NUMBER: node.issueNumber !== undefined ? String(node.issueNumber) : '',
+       RUN_ID: runId,
+       AWS_REGION: config.AWS_REGION,
