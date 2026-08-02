@@ -54,13 +54,16 @@ const CONCURRENCY = 2;
 const REPS = 3;
 
 const TASKS = [
-  // Task set finalized 2026-08-02 after the haiku:A0 difficulty pre-check.
-  // Pilot 6 has NO planning arm, so the correct baseline is pilot 5's no-plan
-  // column: tb1 was 3/3 and tb2 pre-checked 3/3 - both saturated, dropped.
-  // Kept/added only tasks that fail for bare haiku, i.e. can discriminate tiers.
-  { id: 'ab1', repo: 'autograph', cls: 'breadth', dir: 'tasks-v3' }, // 1/3 in pilot 5
-  { id: 'ab3', repo: 'autograph', cls: 'breadth', dir: 'tasks-v4' }, // silent failure in pre-check
-  { id: 'tb3', repo: 'telos', cls: 'breadth', dir: 'tasks-v4' },     // replaces tb2
+  // Final task set (2026-08-02). Difficulty pre-checks at the pilot-6 baseline
+  // (haiku, bare, no plan) killed every telos candidate:
+  //   tb1 3/3 (pilot 5 no-plan), tb2 3/3, tb3 3/3  -> saturated, dropped
+  // Both auto-graph tasks discriminate:
+  //   ab1 1/3 (pilot 5 no-plan), ab3 0/3 (all three SILENT failures)
+  // Difficulty appears to track codebase scale (telos 20K LOC/732 tests vs
+  // auto-graph 79K/1122) more than task design - reported as a limitation:
+  // pilot 6's tier result is measured on one repo.
+  { id: 'ab1', repo: 'autograph', cls: 'breadth', dir: 'tasks-v3' },
+  { id: 'ab3', repo: 'autograph', cls: 'breadth', dir: 'tasks-v4' },
 ];
 const TIERS = ['haiku', 'sonnet', 'opus'];
 const CELLS = [];

@@ -1,0 +1,114 @@
+diff --git a/packages/core/src/prompts/architect.ts b/packages/core/src/prompts/architect.ts
+index b1b2d8a..74c7b1b 100644
+--- a/packages/core/src/prompts/architect.ts
++++ b/packages/core/src/prompts/architect.ts
+@@ -1,3 +1,5 @@
++import { DEFINITION_OF_DONE } from './shared.js';
++
+ export interface ArchitectPromptParams {
+   projectDescription: string;
+   repoStructure?: string;
+@@ -62,5 +64,7 @@ Respond with a JSON object (no markdown fences):
+ {
+   "hldPath": "docs/HLD.md",
+   "summary": "<one-sentence summary of the HLD>"
+-}`;
++}
++
++${DEFINITION_OF_DONE}`;
+ }
+diff --git a/packages/core/src/prompts/developer.ts b/packages/core/src/prompts/developer.ts
+index bedebd8..f92dcad 100644
+--- a/packages/core/src/prompts/developer.ts
++++ b/packages/core/src/prompts/developer.ts
+@@ -1,3 +1,5 @@
++import { DEFINITION_OF_DONE } from './shared.js';
++
+ export interface DeveloperPromptParams {
+   taskDescription: string;
+   repoStructure: string;
+@@ -77,5 +79,7 @@ Respond with a JSON object (no markdown fences):
+   "commitCount": <number of commits made>,
+   "summary": "<brief description of what was implemented>",
+   "testsPassed": true | false
+-}`;
++}
++
++${DEFINITION_OF_DONE}`;
+ }
+diff --git a/packages/core/src/prompts/planner.ts b/packages/core/src/prompts/planner.ts
+index de0bb7c..63baafc 100644
+--- a/packages/core/src/prompts/planner.ts
++++ b/packages/core/src/prompts/planner.ts
+@@ -1,3 +1,5 @@
++import { DEFINITION_OF_DONE } from './shared.js';
++
+ export interface PlannerPromptParams {
+   hldContent: string;
+   repoStructure?: string;
+@@ -60,5 +62,7 @@ Respond with a JSON object (no markdown fences):
+       "riskLevel": "low" | "medium" | "high"
+     }
+   ]
+-}`;
++}
++
++${DEFINITION_OF_DONE}`;
+ }
+diff --git a/packages/core/src/prompts/rebaser.ts b/packages/core/src/prompts/rebaser.ts
+index c8d52b6..6809841 100644
+--- a/packages/core/src/prompts/rebaser.ts
++++ b/packages/core/src/prompts/rebaser.ts
+@@ -1,3 +1,5 @@
++import { DEFINITION_OF_DONE } from './shared.js';
++
+ export interface RebaserPromptParams {
+   branchName: string;
+   baseBranch: string;
+@@ -74,5 +76,7 @@ Respond with a JSON object (no markdown fences):
+   "success": true | false,
+   "conflictsResolved": ["<file path of each conflict resolved>"],
+   "summary": "<description of what was rebased and any conflicts resolved>"
+-}`;
++}
++
++${DEFINITION_OF_DONE}`;
+ }
+diff --git a/packages/core/src/prompts/reviewer.ts b/packages/core/src/prompts/reviewer.ts
+index aa4933b..34f6636 100644
+--- a/packages/core/src/prompts/reviewer.ts
++++ b/packages/core/src/prompts/reviewer.ts
+@@ -1,3 +1,5 @@
++import { DEFINITION_OF_DONE } from './shared.js';
++
+ export interface ReviewerPromptParams {
+   prDiff: string;
+   prDescription: string;
+@@ -70,5 +72,7 @@ Respond with a JSON object (no markdown fences):
+       "description": "<clear description of the issue and suggested fix>"
+     }
+   ]
+-}`;
++}
++
++${DEFINITION_OF_DONE}`;
+ }
+diff --git a/packages/core/src/prompts/reviser.ts b/packages/core/src/prompts/reviser.ts
+index 17e5c3b..a597863 100644
+--- a/packages/core/src/prompts/reviser.ts
++++ b/packages/core/src/prompts/reviser.ts
+@@ -1,3 +1,5 @@
++import { DEFINITION_OF_DONE } from './shared.js';
++
+ export interface ReviserPromptParams {
+   reviewComments: string;
+   prDiff: string;
+@@ -68,5 +70,7 @@ Respond with a JSON object (no markdown fences):
+   "commitsAdded": <number of new commits pushed>,
+   "summary": "<brief description of all changes made>",
+   "addressedComments": ["<summary of comment 1 addressed>", ...]
+-}`;
++}
++
++${DEFINITION_OF_DONE}`;
+ }
