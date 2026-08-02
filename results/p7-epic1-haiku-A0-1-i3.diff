@@ -1,0 +1,566 @@
+diff --git a/packages/core/src/release-policy/__tests__/release-policy.test.ts b/packages/core/src/release-policy/__tests__/release-policy.test.ts
+index 500f93e..7f20c36 100644
+--- a/packages/core/src/release-policy/__tests__/release-policy.test.ts
++++ b/packages/core/src/release-policy/__tests__/release-policy.test.ts
+@@ -1,12 +1,13 @@
+ import { describe, it, expect } from 'vitest';
+ import {
+   validateListing,
++  validateManuscriptStructure,
+   MAX_BLURB_LENGTH,
+   REQUIRED_KEYWORD_COUNT,
+   REQUIRED_CATEGORY_COUNT,
+   ALLOWED_BLURB_TAGS,
+ } from '../index.js';
+-import type { KdpListing } from '../index.js';
++import type { KdpListing, ChapterFile } from '../index.js';
+ 
+ const validListing: KdpListing = {
+   title: 'Valid Title',
+@@ -307,3 +308,364 @@ describe('validateListing', () => {
+     });
+   });
+ });
++
++describe('validateManuscriptStructure', () => {
++  const validChapter = (num: number): ChapterFile => ({
++    path: `manuscript/chapter-${String(num).padStart(2, '0')}.md`,
++    content: `# Chapter ${num}: Valid Title\n\nChapter content here.`,
++  });
++
++  describe('valid manuscript', () => {
++    it('returns valid: true for properly formed chapters', () => {
++      const chapters = [validChapter(1), validChapter(2), validChapter(3)];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('handles single chapter', () => {
++      const result = validateManuscriptStructure([validChapter(1)]);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('allows chapters with numbers greater than 9', () => {
++      const chapters = [
++        validChapter(1),
++        validChapter(2),
++        validChapter(3),
++        validChapter(4),
++        validChapter(5),
++        validChapter(6),
++        validChapter(7),
++        validChapter(8),
++        validChapter(9),
++        validChapter(10),
++        validChapter(11),
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++  });
++
++  describe('H1_MISSING', () => {
++    it('fails when chapter has no level-1 heading', () => {
++      const chapters = [
++        validChapter(1),
++        { path: 'manuscript/chapter-02.md', content: 'No heading here\nJust content' },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_MISSING')).toBe(true);
++    });
++
++    it('fails when chapter is empty', () => {
++      const chapters = [{ path: 'manuscript/chapter-01.md', content: '' }];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_MISSING')).toBe(true);
++    });
++
++    it('fails when chapter has only whitespace', () => {
++      const chapters = [{ path: 'manuscript/chapter-01.md', content: '   \n\n  \t  ' }];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_MISSING')).toBe(true);
++    });
++  });
++
++  describe('H1_NOT_FIRST', () => {
++    it('fails when first non-empty line is not a heading', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'Some content\n# Chapter 1: Title',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_NOT_FIRST')).toBe(true);
++    });
++
++    it('fails when heading comes after empty lines but not first', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '\n\nContent\n# Chapter 1: Title',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_NOT_FIRST')).toBe(true);
++    });
++
++    it('passes when heading is first after empty lines', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '\n\n# Chapter 1: Title\n\nContent',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++    });
++  });
++
++  describe('H1_MALFORMED', () => {
++    it('fails when heading has no chapter number', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter: Title',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_MALFORMED')).toBe(true);
++    });
++
++    it('fails when heading has no title', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1:',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_MALFORMED')).toBe(true);
++    });
++
++    it('fails when heading has empty title after colon', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1:    ',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_MALFORMED')).toBe(true);
++    });
++
++    it('fails when heading is lowercase', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# chapter 1: Title',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_MALFORMED')).toBe(true);
++    });
++
++    it('fails when heading lacks colon', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1 Title',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_MALFORMED')).toBe(true);
++    });
++
++    it('passes with proper format and multi-word title', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: The Beginning of the Story',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++    });
++
++    it('passes with chapter number having leading zeros in content', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: The First Chapter',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++    });
++  });
++
++  describe('H1_NUMBER_MISMATCH', () => {
++    it('fails when heading number does not match path number', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 2: Wrong Number',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_NUMBER_MISMATCH')).toBe(true);
++    });
++
++    it('fails when heading has different number format', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-05.md',
++          content: '# Chapter 005: Wrong Format',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_NUMBER_MISMATCH')).toBe(true);
++    });
++  });
++
++  describe('H1_MALFORMED and H1_NUMBER_MISMATCH interaction', () => {
++    it('skips H1_MALFORMED and H1_NUMBER_MISMATCH if H1_MISSING', () => {
++      const chapters = [{ path: 'manuscript/chapter-01.md', content: 'No heading' }];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.errors.some((e) => e.code === 'H1_MISSING')).toBe(true);
++      expect(result.errors.some((e) => e.code === 'H1_MALFORMED')).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_NUMBER_MISMATCH')).toBe(false);
++    });
++
++    it('reports only H1_NOT_FIRST if first line exists but is not a heading', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'Content first\n# Chapter 1: Title',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.errors.some((e) => e.code === 'H1_NOT_FIRST')).toBe(true);
++      expect(result.errors.some((e) => e.code === 'H1_MALFORMED')).toBe(false);
++      expect(result.errors.some((e) => e.code === 'H1_NUMBER_MISMATCH')).toBe(false);
++    });
++  });
++
++  describe('CHAPTER_DUPLICATE', () => {
++    it('fails when two chapters have the same number', () => {
++      const chapters = [
++        { path: 'manuscript/chapter-01.md', content: '# Chapter 1: First' },
++        { path: 'manuscript/chapter-01.md', content: '# Chapter 1: Duplicate' },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'CHAPTER_DUPLICATE')).toBe(true);
++    });
++
++    it('fails when three chapters have the same number', () => {
++      const chapters = [
++        { path: 'manuscript/chapter-02.md', content: '# Chapter 2: First' },
++        { path: 'manuscript/chapter-02.md', content: '# Chapter 2: Second' },
++        { path: 'manuscript/chapter-02.md', content: '# Chapter 2: Third' },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      const duplicateErrors = result.errors.filter((e) => e.code === 'CHAPTER_DUPLICATE');
++      expect(duplicateErrors).toHaveLength(1);
++    });
++  });
++
++  describe('CHAPTER_GAP', () => {
++    it('fails when chapters are not sequential', () => {
++      const chapters = [validChapter(1), validChapter(3)];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'CHAPTER_GAP')).toBe(true);
++    });
++
++    it('fails when chapters do not start at 1', () => {
++      const chapters = [validChapter(2), validChapter(3)];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.some((e) => e.code === 'CHAPTER_GAP')).toBe(true);
++    });
++
++    it('passes when chapters are 1..n with no gaps', () => {
++      const chapters = [validChapter(1), validChapter(2), validChapter(3), validChapter(4)];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.errors.some((e) => e.code === 'CHAPTER_GAP')).toBe(false);
++    });
++
++    it('tolerates duplicate chapter numbers when checking gaps', () => {
++      const chapters = [validChapter(1), validChapter(1), validChapter(2)];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.errors.some((e) => e.code === 'CHAPTER_GAP')).toBe(false);
++      expect(result.errors.some((e) => e.code === 'CHAPTER_DUPLICATE')).toBe(true);
++    });
++  });
++
++  describe('multiple validation errors', () => {
++    it('reports multiple errors for a single chapter', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'Content\n# Chapter 2: Wrong',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.length).toBeGreaterThan(1);
++    });
++
++    it('reports errors for multiple chapters', () => {
++      const chapters = [
++        { path: 'manuscript/chapter-01.md', content: 'No heading' },
++        { path: 'manuscript/chapter-02.md', content: 'Also no heading' },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors.length).toBeGreaterThan(1);
++    });
++
++    it('sorts errors by code ascending', () => {
++      const chapters = [
++        { path: 'manuscript/chapter-01.md', content: 'No heading' },
++        validChapter(3),
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++
++      const codes = result.errors.map((e) => e.code);
++      for (let i = 1; i < codes.length; i++) {
++        const currentCode = codes[i];
++        const previousCode = codes[i - 1];
++        if (currentCode !== undefined && previousCode !== undefined) {
++          expect(currentCode.localeCompare(previousCode)).toBeGreaterThanOrEqual(0);
++        }
++      }
++    });
++  });
++
++  describe('edge cases', () => {
++    it('handles empty chapter list', () => {
++      const result = validateManuscriptStructure([]);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('handles chapters with different content structure', () => {
++      const chapters = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Title\n\nIntroduction\n\n## Section One\n\nContent here.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++    });
++
++    it('ignores chapters that do not match expected path pattern', () => {
++      const chapters = [
++        validChapter(1),
++        { path: 'other/file.md', content: 'Not a chapter' },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++  });
++});
+diff --git a/packages/core/src/release-policy/index.ts b/packages/core/src/release-policy/index.ts
+index 4496f21..7361b76 100644
+--- a/packages/core/src/release-policy/index.ts
++++ b/packages/core/src/release-policy/index.ts
+@@ -1,6 +1,7 @@
+-export type { KdpListing, ListingError, ListingValidation } from './types.js';
++export type { KdpListing, ListingError, ListingValidation, ChapterFile, ManuscriptError, ManuscriptValidation } from './types.js';
+ export {
+   validateListing,
++  validateManuscriptStructure,
+   MAX_BLURB_LENGTH,
+   REQUIRED_KEYWORD_COUNT,
+   REQUIRED_CATEGORY_COUNT,
+diff --git a/packages/core/src/release-policy/types.ts b/packages/core/src/release-policy/types.ts
+index a7e5821..c03b735 100644
+--- a/packages/core/src/release-policy/types.ts
++++ b/packages/core/src/release-policy/types.ts
+@@ -16,3 +16,18 @@ export interface ListingValidation {
+   valid: boolean;
+   errors: ListingError[];
+ }
++
++export interface ChapterFile {
++  path: string;
++  content: string;
++}
++
++export interface ManuscriptError {
++  code: string;
++  detail: string;
++}
++
++export interface ManuscriptValidation {
++  valid: boolean;
++  errors: ManuscriptError[];
++}
+diff --git a/packages/core/src/release-policy/validate.ts b/packages/core/src/release-policy/validate.ts
+index c4e60bd..45b161e 100644
+--- a/packages/core/src/release-policy/validate.ts
++++ b/packages/core/src/release-policy/validate.ts
+@@ -1,4 +1,5 @@
+-import type { KdpListing, ListingValidation, ListingError } from './types.js';
++import type { KdpListing, ListingValidation, ListingError, ChapterFile, ManuscriptValidation, ManuscriptError } from './types.js';
++import { getChapterFilePath } from '../writing/paths.js';
+ 
+ export const MAX_BLURB_LENGTH = 4000;
+ export const REQUIRED_KEYWORD_COUNT = 7;
+@@ -97,3 +98,134 @@ function checkDisallowedHtmlTags(blurb: string): ListingError | null {
+ 
+   return null;
+ }
++
++function extractChapterNumberFromPath(path: string): number | null {
++  const match = path.match(/chapter-(\d+)\.md$/);
++  if (!match || match[1] === undefined) {
++    return null;
++  }
++  return parseInt(match[1], 10);
++}
++
++function getFirstNonEmptyLine(content: string): string | null {
++  const lines = content.split('\n');
++  for (const line of lines) {
++    if (line.trim() !== '') {
++      return line;
++    }
++  }
++  return null;
++}
++
++function getFirstHeading(content: string): string | null {
++  const lines = content.split('\n');
++  for (const line of lines) {
++    if (line.trim().startsWith('#')) {
++      return line;
++    }
++  }
++  return null;
++}
++
++export function validateManuscriptStructure(chapters: ChapterFile[]): ManuscriptValidation {
++  const errors: ManuscriptError[] = [];
++  const chapterNumbers: number[] = [];
++  const chapterNumberMap = new Map<number, string[]>();
++
++  for (let i = 0; i < chapters.length; i++) {
++    const chapter = chapters[i];
++    const chapterNumber = extractChapterNumberFromPath(chapter.path);
++
++    if (chapterNumber === null) {
++      continue;
++    }
++
++    chapterNumbers.push(chapterNumber);
++    if (!chapterNumberMap.has(chapterNumber)) {
++      chapterNumberMap.set(chapterNumber, []);
++    }
++    const paths = chapterNumberMap.get(chapterNumber);
++    if (paths) {
++      paths.push(chapter.path);
++    }
++
++    const firstNonEmptyLine = getFirstNonEmptyLine(chapter.content);
++    const firstHeading = getFirstHeading(chapter.content);
++
++    if (!firstHeading) {
++      errors.push({
++        code: 'H1_MISSING',
++        detail: `Chapter ${chapterNumber}: Missing level-1 heading`,
++      });
++      continue;
++    }
++
++    if (!firstNonEmptyLine || firstNonEmptyLine !== firstHeading) {
++      errors.push({
++        code: 'H1_NOT_FIRST',
++        detail: `Chapter ${chapterNumber}: First non-empty line is not a level-1 heading`,
++      });
++    }
++
++    const h1Match = firstHeading.match(/^#\s+Chapter\s+(\d+):\s+(.+)$/);
++    if (!h1Match) {
++      errors.push({
++        code: 'H1_MALFORMED',
++        detail: `Chapter ${chapterNumber}: Level-1 heading does not match "# Chapter <N>: <Title>" format`,
++      });
++      continue;
++    }
++
++    const headingNumber = h1Match[1];
++    const title = h1Match[2];
++
++    if (!headingNumber || !title || title.trim() === '') {
++      errors.push({
++        code: 'H1_MALFORMED',
++        detail: `Chapter ${chapterNumber}: Level-1 heading does not match "# Chapter <N>: <Title>" format`,
++      });
++      continue;
++    }
++
++    const parsedHeadingNumber = parseInt(headingNumber, 10);
++    if (parsedHeadingNumber !== chapterNumber || headingNumber !== String(parsedHeadingNumber)) {
++      errors.push({
++        code: 'H1_NUMBER_MISMATCH',
++        detail: `Chapter ${chapterNumber}: Heading number ${headingNumber} does not match path chapter number`,
++      });
++    }
++  }
++
++  for (const [chapterNumber, paths] of chapterNumberMap.entries()) {
++    if (paths.length > 1) {
++      errors.push({
++        code: 'CHAPTER_DUPLICATE',
++        detail: `Duplicate chapters: ${paths.length} files resolve to chapter number ${chapterNumber}`,
++      });
++    }
++  }
++
++  if (chapterNumbers.length > 0) {
++    const sortedNumbers = [...new Set(chapterNumbers)].sort((a, b) => a - b);
++    const expectedNumbers = Array.from({ length: sortedNumbers.length }, (_, i) => i + 1);
++
++    for (let i = 0; i < sortedNumbers.length; i++) {
++      const sorted = sortedNumbers[i];
++      const expected = expectedNumbers[i];
++      if (sorted !== undefined && expected !== undefined && sorted !== expected) {
++        errors.push({
++          code: 'CHAPTER_GAP',
++          detail: `Chapter numbers are not sequential from 1 to ${sortedNumbers.length}`,
++        });
++        break;
++      }
++    }
++  }
++
++  errors.sort((a, b) => a.code.localeCompare(b.code));
++
++  return {
++    valid: errors.length === 0,
++    errors,
++  };
++}

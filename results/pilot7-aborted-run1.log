@@ -1,0 +1,10 @@
+[pilot7] 2026-08-02T16:36:47.817Z pilot7 start: 18 epic runs x 8 issues, concurrency 2, ceiling $1000 (incl. $256.26 prior), resume: 0 epics + 0 issues journaled
+[pilot7] 2026-08-02T16:36:47.820Z === EPIC epic1:haiku:A0:1 ($263.45 cumulative) ===
+[pilot7] 2026-08-02T16:37:02.898Z === EPIC epic1:haiku:A0:2 ($263.45 cumulative) ===
+[pilot7] 2026-08-02T16:41:46.982Z epic1:haiku:A0:2:i1: strict=true build=true visible=true holdout=true blocks=0 review=- $0.23 278s
+[pilot7] 2026-08-02T16:42:58.968Z epic1:haiku:A0:1:i1: strict=true build=true visible=true holdout=true blocks=0 review=- $0.30 356s
+[pilot7] 2026-08-02T16:45:03.309Z epic1:haiku:A0:2:i2: strict=true build=true visible=true holdout=true blocks=0 review=- $0.26 196s
+[pilot7] 2026-08-02T16:48:04.768Z epic1:haiku:A0:1:i2: strict=true build=true visible=true holdout=true blocks=0 review=- $0.32 306s
+[pilot7] 2026-08-02T16:52:25.164Z epic1:haiku:A0:2:i3: strict=true build=true visible=true holdout=true blocks=0 review=- $0.49 442s
+[pilot7] 2026-08-02T16:57:30.356Z epic1:haiku:A0:1:i3: strict=false build=false visible=true holdout=false blocks=0 review=- $0.54 566s
+[pilot7] 2026-08-02T16:58:52.501Z epic1:haiku:A0:2:i4: strict=false build=true visible=true holdout=false blocks=0 review=- $0.69 387s ALARMS=no-files-changed

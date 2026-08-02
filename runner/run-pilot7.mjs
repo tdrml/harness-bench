@@ -232,9 +232,9 @@ function buildIssuePrompt(issue, cell) {
   return p;
 }
 
-async function review(workdir, issue, modelId, rec) {
+async function review(workdir, issue, modelId, rec, baseSha) {
   const brief = readFileSync(join(EPIC_DIR, issue.id, 'brief.md'), 'utf8');
-  const diff = sh('git diff HEAD', { cwd: workdir, maxBuffer: 16 * 1024 * 1024 }).slice(0, 100000);
+  const diff = sh(`git diff ${baseSha}`, { cwd: workdir, maxBuffer: 16 * 1024 * 1024 }).slice(0, 100000);
   const status = sh('git status --porcelain', { cwd: workdir }).slice(0, 2000);
   const prompt = `You are an adversarial code reviewer for an autonomous coding agent's work. Attempt to REFUTE that this change correctly and fully accomplishes the issue. Look specifically for: missed sub-requirements (exact names, values, defaults), weakened existing assertions, incomplete wiring or caller migration across layers, divergence from conventions this repository already established for this feature area, and unrelated or excessive changes. You may read repository files to check the diff's claims.
 
@@ -309,7 +309,7 @@ function issueHoldoutEntry(issueId) {
   return { taskDir, map: JSON.parse(readFileSync(join(taskDir, 'holdout.json'), 'utf8')) };
 }
 
-function scoreIssue(workdir, issueId, rec) {
+function scoreIssue(workdir, issueId, rec, baseSha) {
   const build = spawnSync('pnpm', ['build'], { cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
   rec.buildGreen = build.status === 0;
   if (!rec.buildGreen) {
@@ -319,7 +319,7 @@ function scoreIssue(workdir, issueId, rec) {
   const suite = spawnSync('pnpm', ['-s', 'test'], { cwd: workdir, encoding: 'utf8', timeout: 900000, maxBuffer: 64 * 1024 * 1024 });
   rec.visibleGreen = suite.status === 0;
 
-  const changed = sh('git diff --name-only HEAD', { cwd: workdir }).split('\n').filter(Boolean);
+  const changed = sh(`git diff --name-only ${baseSha}`, { cwd: workdir }).split('\n').filter(Boolean);
   const untracked = sh('git ls-files --others --exclude-standard', { cwd: workdir }).split('\n').filter(Boolean);
   const isTest = (f) => /__tests__\/|\.test\.ts$/.test(f);
   rec.testEdits = [...changed.filter(isTest), ...untracked.filter(isTest)];
@@ -329,7 +329,7 @@ function scoreIssue(workdir, issueId, rec) {
   // their contents; diff size is a pre-registered discipline proxy, so it has
   // to include the code the agent actually wrote.
   sh('git add -A -N', { cwd: workdir });
-  rec.diffstat = sh('git diff --shortstat HEAD', { cwd: workdir }).trim();
+  rec.diffstat = sh(`git diff --shortstat ${baseSha}`, { cwd: workdir }).trim();
 
   const hold = runHoldout(workdir, issueHoldoutEntry(issueId));
   rec.holdoutPass = hold.pass;
@@ -390,6 +390,14 @@ async function runEpic(cell, rep) {
     }
     const rec = { event: 'issue', epicKey, epic: 'epic1', issue: issue.id, model: cell.model, arm: cell.arm, rep, costUsd: 0, invocations: [] };
     const t1 = Date.now();
+    // Everything this issue is graded and reviewed on is diffed against the tree
+    // as it stood BEFORE the agent ran - never against HEAD. Agents sometimes
+    // commit their own work, and `git diff HEAD` then reports nothing: an empty
+    // saved artifact, empty discipline metrics, an undetectable tamper check,
+    // and - worst - an empty diff handed to the adversarial reviewer, which is
+    // finding 2's silent no-op review reintroduced by the harness itself.
+    const baseSha = sh('git rev-parse HEAD', { cwd: workdir }).trim();
+    rec.baseSha = baseSha;
     try {
       const primary = await claude(workdir, buildIssuePrompt(issue, cell), modelId);
       rec.costUsd += primary.cost;
@@ -397,7 +405,7 @@ async function runEpic(cell, rep) {
 
       if (cell.arm === 'FULL') {
         rec.contract = await extractJsonWithSalvage(workdir, primary.text, '{"summary": string, "filesChanged": string[], "testsGreen": boolean}', modelId, rec, 'contract');
-        const verdict = await review(workdir, issue, modelId, rec);
+        const verdict = await review(workdir, issue, modelId, rec, baseSha);
         rec.reviewVerdict = verdict?.verdict ?? 'UNPARSEABLE';
         rec.reviewIssues = verdict?.issues ?? [];
         if (rec.reviewVerdict === 'REQUEST_CHANGES' && primary.sessionId) {
@@ -409,7 +417,7 @@ async function runEpic(cell, rep) {
         }
       }
 
-      scoreIssue(workdir, issue.id, rec);
+      scoreIssue(workdir, issue.id, rec, baseSha);
       plausibility(rec, primary);
       // Auth/CLI death signature: invalidate + halt this epic (finding 17b -
       // a credential expiry must never be scored as a model failure).
@@ -421,7 +429,7 @@ async function runEpic(cell, rep) {
         return; // leave workdir for autopsy; epic resumes after operator fixes auth
       }
 
-      writeFileSync(join(RESULTS, `p7-${epicKey.replace(/:/g, '-')}-${issue.id}.diff`), sh('git diff HEAD', { cwd: workdir, maxBuffer: 32 * 1024 * 1024 }));
+      writeFileSync(join(RESULTS, `p7-${epicKey.replace(/:/g, '-')}-${issue.id}.diff`), sh(`git diff ${baseSha}`, { cwd: workdir, maxBuffer: 32 * 1024 * 1024 }));
       sh(`git add -A && git -c user.email=bench@local -c user.name=bench commit -q --allow-empty -m "agent: ${issue.id}"`, { cwd: workdir });
     } catch (err) {
       rec.error = String(err).slice(0, 500);

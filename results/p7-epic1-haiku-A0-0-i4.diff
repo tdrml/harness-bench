@@ -1,0 +1,448 @@
+diff --git a/packages/cdk/src/__tests__/auto-graph-stack.test.ts b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+index c55de96..240a6ac 100644
+--- a/packages/cdk/src/__tests__/auto-graph-stack.test.ts
++++ b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+@@ -186,8 +186,8 @@ describe('AutoGraphStack', () => {
+   });
+ 
+   describe('ECS Task Definitions', () => {
+-    it('creates exactly 8 Fargate task definitions', () => {
+-      template.resourceCountIs('AWS::ECS::TaskDefinition', 8);
++    it('creates exactly 9 Fargate task definitions', () => {
++      template.resourceCountIs('AWS::ECS::TaskDefinition', 9);
+     });
+ 
+     it('creates outliner task def with 2 vCPU / 8 GB', () => {
+diff --git a/packages/cdk/src/constructs/compute.ts b/packages/cdk/src/constructs/compute.ts
+index 3f1bbdd..eea9df5 100644
+--- a/packages/cdk/src/constructs/compute.ts
++++ b/packages/cdk/src/constructs/compute.ts
+@@ -33,6 +33,7 @@ const TASK_CONFIGS: TaskConfig[] = [
+   { name: 'continuity-checker', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 15 },
+   { name: 'auditor', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 120 },
+   { name: 'fixer', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 60 },
++  { name: 'packager', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 30 },
+ ];
+ 
+ function toPascalCase(str: string): string {
+diff --git a/packages/core/src/prompts/index.ts b/packages/core/src/prompts/index.ts
+index 6ede6b0..8dbc60e 100644
+--- a/packages/core/src/prompts/index.ts
++++ b/packages/core/src/prompts/index.ts
+@@ -22,4 +22,7 @@ export type { AuditorPromptParams } from './auditor.js';
+ export { buildContinuityFixerPrompt } from './continuity-fixer.js';
+ export type { ContinuityFixerPromptParams } from './continuity-fixer.js';
+ 
++export { buildPackagerPrompt } from './packager.js';
++export type { PackagerPromptParams } from './packager.js';
++
+ export { buildSharedPreamble, GUARD_RAILS, CLI_INSTRUCTIONS, REPO_CONVENTIONS } from './shared.js';
+diff --git a/packages/core/src/prompts/packager.ts b/packages/core/src/prompts/packager.ts
+new file mode 100644
+index 0000000..4620e80
+--- /dev/null
++++ b/packages/core/src/prompts/packager.ts
+@@ -0,0 +1,164 @@
++import { ProjectType } from '../config/schemas.js';
++import { buildSharedPreamble } from './shared.js';
++
++export interface PackagerPromptParams {
++  title: string;
++  repoName: string;
++  chapterCount: number;
++  projectType?: ProjectType | undefined;
++}
++
++function buildFictionPackageBody(chapterCount: number): string {
++  return `## Your Task
++
++Assemble the final manuscript and release manifest for publication.
++
++### Phase 1 — Assemble Manuscript
++
++Read all chapter files from \`manuscript/chapter-NN.md\` (zero-padded — \`chapter-01.md\`, \`chapter-12.md\`, etc.) from chapter 1 through chapter ${chapterCount}, in order.
++
++Create \`manuscript/manuscript.md\` that concatenates:
++- A front matter section with the book title, author, and basic metadata
++- All ${chapterCount} chapters in reading order, each preceded by a chapter heading
++
++Format each chapter heading as:
++
++\`\`\`markdown
++## Chapter N: {Chapter Title}
++\`\`\`
++
++Then include the chapter content verbatim. Do NOT modify chapter text — this assembly is read-only except for adding the front matter and chapter headings.
++
++### Phase 2 — Create Release Manifest
++
++Write \`release/manifest.json\` with this schema:
++
++\`\`\`json
++{
++  "title": "{book title}",
++  "chapterCount": ${chapterCount},
++  "estimatedWordCount": {total word count},
++  "status": "ready-for-release",
++  "assembledAt": "{ISO-8601 timestamp}",
++  "chapters": [
++    {
++      "number": 1,
++      "title": "{chapter title from outline}",
++      "wordCount": {chapter word count}
++    }
++  ]
++}
++\`\`\`
++
++Count words in each chapter by splitting on whitespace and counting non-empty tokens. Sum the counts to get \`estimatedWordCount\`.
++
++### Phase 3 — Commit and Push
++
++\`\`\`
++git add manuscript/manuscript.md release/manifest.json
++git commit -m "release: assemble final manuscript and manifest"
++git push
++\`\`\`
++
++## Self-check before completing
++
++Before you push the commit, confirm:
++
++- \`manuscript/manuscript.md\` exists and contains all ${chapterCount} chapters in order.
++- \`release/manifest.json\` is valid JSON with all required fields.
++- The manifest lists exactly ${chapterCount} chapters.
++- Word counts in the manifest match the actual chapter content.
++- All chapter content is verbatim (no modifications except for added headings).`;
++}
++
++function buildNonFictionPackageBody(chapterCount: number): string {
++  return `## Your Task
++
++Assemble the final manuscript and release manifest for publication.
++
++### Phase 1 — Assemble Manuscript
++
++Read all chapter files from \`manuscript/chapter-NN.md\` (zero-padded — \`chapter-01.md\`, \`chapter-12.md\`, etc.) from chapter 1 through chapter ${chapterCount}, in order.
++
++Create \`manuscript/manuscript.md\` that concatenates:
++- A front matter section with the book title, author, publication date, and basic metadata
++- All ${chapterCount} chapters in reading order, each preceded by a chapter heading
++- Any appendices or reference materials needed for publication
++
++Format each chapter heading as:
++
++\`\`\`markdown
++## Chapter N: {Chapter Title}
++\`\`\`
++
++Then include the chapter content verbatim. Do NOT modify chapter text — this assembly is read-only except for adding the front matter and chapter headings.
++
++### Phase 2 — Create Release Manifest
++
++Write \`release/manifest.json\` with this schema:
++
++\`\`\`json
++{
++  "title": "{book title}",
++  "chapterCount": ${chapterCount},
++  "estimatedWordCount": {total word count},
++  "status": "ready-for-release",
++  "assembledAt": "{ISO-8601 timestamp}",
++  "chapters": [
++    {
++      "number": 1,
++      "title": "{chapter title from outline}",
++      "wordCount": {chapter word count}
++    }
++  ]
++}
++\`\`\`
++
++Count words in each chapter by splitting on whitespace and counting non-empty tokens. Sum the counts to get \`estimatedWordCount\`.
++
++### Phase 3 — Commit and Push
++
++\`\`\`
++git add manuscript/manuscript.md release/manifest.json
++git commit -m "release: assemble final manuscript and manifest"
++git push
++\`\`\`
++
++## Self-check before completing
++
++Before you push the commit, confirm:
++
++- \`manuscript/manuscript.md\` exists and contains all ${chapterCount} chapters in order.
++- \`release/manifest.json\` is valid JSON with all required fields.
++- The manifest lists exactly ${chapterCount} chapters.
++- Word counts in the manifest match the actual chapter content.
++- All chapter content is verbatim (no modifications except for added headings).`;
++}
++
++export function buildPackagerPrompt(params: PackagerPromptParams): string {
++  const { title, repoName, chapterCount, projectType } = params;
++  const isNonFiction = projectType === ProjectType.NON_FICTION;
++
++  const packageBody = isNonFiction
++    ? buildNonFictionPackageBody(chapterCount)
++    : buildFictionPackageBody(chapterCount);
++
++  const roleIntro = isNonFiction
++    ? `You are the Packager agent. Your responsibility is to assemble the final manuscript and release manifest for a non-fiction book after all chapters have been edited, reviewed, and merged to the \`main\` branch. You will read all chapters sequentially, combine them with proper front matter and chapter headings, and create a structured release manifest for publication.`
++    : `You are the Packager agent. Your responsibility is to assemble the final manuscript and release manifest for a book after all chapters have been edited, reviewed, and merged to the \`main\` branch. You will read all chapters sequentially, combine them with proper front matter and chapter headings, and create a structured release manifest for publication.`;
++
++  return `# Packager Agent — System Prompt
++
++${roleIntro}
++
++${buildSharedPreamble()}
++
++## Context
++
++- **Book**: ${title}
++- **Repository**: ${repoName}
++- **Total chapters**: ${chapterCount}
++- **Source**: all chapters have been merged to the \`main\` branch at \`manuscript/chapter-NN.md\`.
++
++${packageBody}`;
++}
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+index 1283926..118d80d 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+@@ -18,6 +18,7 @@ import { handler as continuityCheckHandler } from '../../../handlers/continuity-
+ import { handler as continuityAuditHandler } from '../../../handlers/continuity-audit.js';
+ import { handler as continuityFixerHandler } from '../../../handlers/continuity-fixer.js';
+ import { handler as finalReviewHandler } from '../../../handlers/final-review.js';
++import { handler as packageManuscriptHandler } from '../../../handlers/package-manuscript.js';
+ import { handler as reconcileEnqueuerHandler } from '../../../handlers/reconcile-enqueuer.js';
+ 
+ type SQSHandlerFn = (event: SQSEvent, context: never, callback: () => void) => void | Promise<unknown>;
+@@ -38,6 +39,7 @@ const HANDLER_MAP: Record<string, SQSHandlerFn> = {
+   CONTINUITY_AUDIT: continuityAuditHandler,
+   CONTINUITY_FIX: continuityFixerHandler,
+   FINAL_REVIEW: finalReviewHandler,
++  PACKAGE_MANUSCRIPT: packageManuscriptHandler,
+ };
+ 
+ let _msgCounter = 0;
+diff --git a/packages/lambdas/src/handlers/dispatcher.ts b/packages/lambdas/src/handlers/dispatcher.ts
+index 93bbec0..1c21d20 100644
+--- a/packages/lambdas/src/handlers/dispatcher.ts
++++ b/packages/lambdas/src/handlers/dispatcher.ts
+@@ -17,6 +17,7 @@ import { handle as handleContinuityCheck } from './continuity-check.js';
+ import { handle as handleContinuityAudit } from './continuity-audit.js';
+ import { handle as handleContinuityFix } from './continuity-fixer.js';
+ import { handle as handleFinalReview } from './final-review.js';
++import { handle as handlePackageManuscript } from './package-manuscript.js';
+ 
+ type HandlerFn = (workItem: WorkItem, context: HandlerContext) => Promise<void>;
+ 
+@@ -36,6 +37,7 @@ const handlers: Record<string, HandlerFn> = {
+   CONTINUITY_AUDIT: handleContinuityAudit,
+   CONTINUITY_FIX: handleContinuityFix,
+   FINAL_REVIEW: handleFinalReview,
++  PACKAGE_MANUSCRIPT: handlePackageManuscript,
+ };
+ 
+ const sqsHandler = withSQSHandler(async (workItem, context) => {
+diff --git a/packages/lambdas/src/handlers/package-manuscript.ts b/packages/lambdas/src/handlers/package-manuscript.ts
+new file mode 100644
+index 0000000..7a2f2bc
+--- /dev/null
++++ b/packages/lambdas/src/handlers/package-manuscript.ts
+@@ -0,0 +1,107 @@
++import { ulid } from 'ulid';
++import {
++  createDynamoClient,
++  ProjectService,
++  TaskGraphService,
++  AgentRunService,
++  TaskOutputService,
++  buildPackagerPrompt,
++  enqueue,
++} from '@auto-graph/core';
++import type { WorkItem } from '@auto-graph/core';
++import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import type { HandlerContext } from '../shared/index.js';
++
++export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
++  const { logger, config } = context;
++
++  if (workItem.type !== 'PACKAGE_MANUSCRIPT') {
++    throw new Error(`Unexpected work item type: ${workItem.type}`);
++  }
++
++  const { projectId } = workItem;
++
++  const packagerTaskDefArn = process.env['PACKAGER_TASK_DEF_ARN'];
++  if (!packagerTaskDefArn) {
++    throw new Error('PACKAGER_TASK_DEF_ARN environment variable is not set');
++  }
++
++  const dynamoClient = createDynamoClient(config.AWS_REGION);
++  const projectService = new ProjectService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const taskGraphService = new TaskGraphService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const agentRunService = new AgentRunService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const taskOutputService = new TaskOutputService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++
++  const project = await projectService.get(projectId);
++  if (!project) {
++    throw new Error(`Project not found: ${projectId}`);
++  }
++
++  const taskGraph = await taskGraphService.getLatest(projectId);
++  if (!taskGraph) {
++    throw new Error(`Task graph not found for project: ${projectId}`);
++  }
++
++  const chapterCount = taskGraph.nodes.length;
++
++  const systemPrompt = buildPackagerPrompt({
++    title: project.config.title,
++    repoName: project.repoName,
++    chapterCount,
++    projectType: project.config.projectType,
++  });
++
++  const runId = ulid();
++  const now = new Date().toISOString();
++
++  await taskOutputService.save({
++    runId,
++    outputType: 'system-prompt',
++    projectId,
++    content: systemPrompt,
++    contentLength: systemPrompt.length,
++    createdAt: now,
++  });
++
++  const taskArn = await launchECSTask({
++    taskDefinition: packagerTaskDefArn,
++    command: ['claude', '-p', '$SYSTEM_PROMPT'],
++    environment: {
++      PROJECT_ID: projectId,
++      REPO_NAME: project.repoName,
++      RUN_ID: runId,
++      AWS_REGION: config.AWS_REGION,
++      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
++    },
++    config,
++    stateMachineArn: process.env['STATE_MACHINE_ARN'],
++    runId,
++    projectId,
++  });
++
++  await agentRunService.create({
++    runId,
++    projectId,
++    taskArn,
++    workerType: 'packager',
++    status: 'RUNNING',
++    startedAt: now,
++  });
++
++  await projectService.updateStatus(projectId, 'PACKAGING');
++
++  await enqueue(config.SQS_QUEUE_URL, {
++    type: 'RECONCILE',
++    projectId,
++    runId,
++  });
++
++  logger.info('Packager ECS task launched', {
++    projectId,
++    chapterCount,
++    runId,
++    taskArn,
++  });
++}
++
++export const handler = withSQSHandler(handle);
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 8e2e77f..6b4cb8e 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -164,6 +164,14 @@ async function reEnqueueForRetry(
+       );
+       return true;
+     }
++    case 'packager': {
++      await enqueueReaction(
++        queueUrlPrefix,
++        { type: 'PACKAGE_MANUSCRIPT', projectId },
++        sourceRunId,
++      );
++      return true;
++    }
+     default:
+       return false;
+   }
+@@ -584,7 +592,7 @@ async function runReconcile(
+           }
+         }
+       } else {
+-        // Workers without nodeId (outliner, planner) — retry transient failures
++        // Workers without nodeId (outliner, planner, packager) — retry transient failures
+         const projectRuns = await agentRunService.listByProject(projectId);
+         const failedAttempts = projectRuns.filter(
+           (r) => r.workerType === agentRun.workerType && r.status === 'FAILED',
+@@ -606,6 +614,13 @@ async function runReconcile(
+               runId,
+             );
+             reEnqueued = true;
++          } else if (agentRun.workerType === 'packager') {
++            await enqueueReaction(
++              config.SQS_QUEUE_URL,
++              { type: 'PACKAGE_MANUSCRIPT', projectId },
++              runId,
++            );
++            reEnqueued = true;
+           }
+           // Note: auditor and fixer failures are handled above with explicit
+           // GitHub-issue creation and feed-forward to FINAL_REVIEW; they are
+@@ -1021,6 +1036,16 @@ async function runReconcile(
+       });
+       break;
+     }
++
++    case 'packager': {
++      // Packager completed the manuscript assembly and manifest creation.
++      // Pipeline is complete — manuscript is ready for release.
++      logger.info('Packager succeeded, manuscript ready for release', {
++        projectId,
++        runId,
++      });
++      break;
++    }
+   }
+ 
+   logger.info('Reconcile complete', {
+diff --git a/packages/worker/src/entrypoint.ts b/packages/worker/src/entrypoint.ts
+index efc4e10..56d0280 100644
+--- a/packages/worker/src/entrypoint.ts
++++ b/packages/worker/src/entrypoint.ts
+@@ -77,6 +77,7 @@ export async function loadWorker(workerType: string): Promise<WorkerModule> {
+       import('./workers/continuity-checker.js') as Promise<WorkerModule>,
+     auditor: () => import('./workers/auditor.js') as Promise<WorkerModule>,
+     fixer: () => import('./workers/continuity-fixer.js') as Promise<WorkerModule>,
++    packager: () => import('./workers/packager.js') as Promise<WorkerModule>,
+   };
+ 
+   const loader = loaders[workerType];
+diff --git a/packages/worker/src/workers/packager.ts b/packages/worker/src/workers/packager.ts
+new file mode 100644
+index 0000000..b49068a
+--- /dev/null
++++ b/packages/worker/src/workers/packager.ts
+@@ -0,0 +1,9 @@
++import type { WorkerEnv } from '../types.js';
++
++export async function prepare(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // Packager works on main branch; no branch setup required
++}
++
++export async function finalize(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // The packager commits and pushes its release artifacts directly — no post-processing needed
++}

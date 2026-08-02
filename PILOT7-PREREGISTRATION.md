@@ -302,3 +302,39 @@ does not typecheck, so a type error in a test file passes the suite. **The v1 ga
 which ran `pnpm test` alone, would have allowed that stop.** It is also exactly the
 defect the smoke epic's issue 5 shipped, and the reason the enforcement arm is
 expected to diverge here.
+
+## Amendment 4 — 2026-08-02, 40 minutes into the grid (grid restarted)
+
+A plausibility alarm (`no-files-changed` on an issue that spent $0.69 over 62 turns)
+turned out to be **the instrument's bug, not the model's** — the fourth time in this
+study that has been true, and the reason every failure gets autopsied before it is
+counted.
+
+The agent had done the work: sixteen files, `package-manuscript.ts` created, the
+handler wired through the pipeline. It had also **committed its own work**. The
+runner computed everything from `git diff HEAD`, which therefore reported nothing.
+
+Four things were silently wrong whenever an agent self-commits:
+
+1. the saved per-issue diff — the study's published raw artifact — was zero bytes;
+2. `changedFiles`, `diffstat` and `testEdits` were empty, so the discipline proxies
+   were wrong;
+3. the **tamper check** reads `testEdits`, so test modification became undetectable —
+   the run above touched two test files that the old method could not see;
+4. worst, the FULL arm hands the reviewer `git diff HEAD`. A self-committing agent
+   would have handed its adversarial reviewer an **empty diff**, which is finding 2's
+   silent no-op review reintroduced by my own harness — and the FULL cells were about
+   two hours from starting.
+
+Fixed: every per-issue diff, metric, artifact and reviewer input is now computed
+against a **base SHA captured before that issue's agent runs**, never against `HEAD`.
+Verified on the captured workdir: the old method reported 7 files / 52 insertions, the
+corrected one reports 16 / 305, and recovers the two test files the tamper check had
+been blind to.
+
+The two partially-completed epics (`haiku:A0:1`, `haiku:A0:2`, $2.84) ran under the
+defective instrument and are marked `invalidate` and re-executed from scratch. The
+grid was restarted from zero rather than resumed.
+
+Nothing about this was visible in a pass/fail column. It was visible in a number that
+did not look plausible.

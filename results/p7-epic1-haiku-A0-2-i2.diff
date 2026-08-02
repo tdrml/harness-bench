@@ -1,0 +1,84 @@
+diff --git a/packages/core/src/dynamodb/types.ts b/packages/core/src/dynamodb/types.ts
+index 0c391e4..99ec486 100644
+--- a/packages/core/src/dynamodb/types.ts
++++ b/packages/core/src/dynamodb/types.ts
+@@ -10,6 +10,7 @@ export type ProjectStatus =
+   | 'PLANNING'
+   | 'WRITING'
+   | 'REVIEWING'
++  | 'PACKAGING'
+   | 'COMPLETE'
+   | 'FAILED';
+ 
+@@ -77,7 +78,8 @@ export type WorkerType =
+   | 'reviser'
+   | 'continuity-checker'
+   | 'auditor'
+-  | 'fixer';
++  | 'fixer'
++  | 'packager';
+ 
+ export type AgentRunStatus =
+   | 'PENDING'
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index f291e73..a4df96e 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -14,6 +14,7 @@ export type {
+   TriggerNextChapterItem,
+   ReconcileSweepItem,
+   FinalReviewItem,
++  PackageManuscriptItem,
+   WorkItem,
+ } from './types.js';
+ 
+@@ -33,6 +34,7 @@ export {
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+diff --git a/packages/core/src/queue/schemas.ts b/packages/core/src/queue/schemas.ts
+index 6b43fb3..7e6cd28 100644
+--- a/packages/core/src/queue/schemas.ts
++++ b/packages/core/src/queue/schemas.ts
+@@ -94,6 +94,12 @@ export const FinalReviewSchema = z.object({
+   projectId: z.string().min(1),
+ });
+ 
++export const PackageManuscriptSchema = z.object({
++  type: z.literal('PACKAGE_MANUSCRIPT'),
++  projectId: z.string().min(1),
++  runId: z.string().optional(),
++});
++
+ export const WorkItemSchema = z.discriminatedUnion('type', [
+   BootstrapProjectSchema,
+   BootstrapRepoSchema,
+@@ -111,4 +117,5 @@ export const WorkItemSchema = z.discriminatedUnion('type', [
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
+ ]);
+diff --git a/packages/core/src/queue/types.ts b/packages/core/src/queue/types.ts
+index a0da274..76aca12 100644
+--- a/packages/core/src/queue/types.ts
++++ b/packages/core/src/queue/types.ts
+@@ -16,6 +16,7 @@ import type {
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+@@ -35,5 +36,6 @@ export type ContinuityFixItem = z.infer<typeof ContinuityFixSchema>;
+ export type TriggerNextChapterItem = z.infer<typeof TriggerNextChapterSchema>;
+ export type ReconcileSweepItem = z.infer<typeof ReconcileSweepSchema>;
+ export type FinalReviewItem = z.infer<typeof FinalReviewSchema>;
++export type PackageManuscriptItem = z.infer<typeof PackageManuscriptSchema>;
+ 
+ export type WorkItem = z.infer<typeof WorkItemSchema>;
