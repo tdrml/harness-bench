@@ -3,3 +3,4 @@ runs/
 .claude-bench-config/
 node_modules/
 .pristine-autograph/
+.reference-epic1/

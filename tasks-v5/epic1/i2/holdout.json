@@ -1,0 +1,3 @@
+{
+  "holdout.i2.test.ts": "packages/core/src/queue/__tests__"
+}

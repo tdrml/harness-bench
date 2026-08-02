@@ -1,0 +1,3 @@
+{
+  "holdout.i1.test.ts": "packages/core/src/release-policy/__tests__"
+}
