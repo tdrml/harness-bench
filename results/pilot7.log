@@ -1,0 +1,12 @@
+[pilot7] 2026-08-02T15:20:57.471Z pilot7 start: 1 epic runs x 8 issues, concurrency 2, ceiling $1000 (incl. $256.26 prior), resume: 0 epics + 0 issues journaled
+[pilot7] 2026-08-02T15:20:57.472Z === EPIC epic1:haiku:A0:0 ($256.26 cumulative) ===
+[pilot7] 2026-08-02T15:24:17.566Z epic1:haiku:A0:0:i1: strict=true build=true visible=true holdout=true blocks=0 review=- $0.19 196s
+[pilot7] 2026-08-02T15:30:14.168Z epic1:haiku:A0:0:i2: strict=true build=true visible=true holdout=true blocks=0 review=- $0.32 357s
+[pilot7] 2026-08-02T15:37:07.334Z epic1:haiku:A0:0:i3: strict=true build=true visible=true holdout=true blocks=0 review=- $0.46 413s
+[pilot7] 2026-08-02T15:43:30.741Z epic1:haiku:A0:0:i4: strict=true build=true visible=true holdout=true blocks=0 review=- $0.64 383s
+[pilot7] 2026-08-02T15:58:31.401Z epic1:haiku:A0:0:i5: strict=false build=false visible=false holdout=false blocks=0 review=- $1.84 901s
+[pilot7] 2026-08-02T16:07:56.826Z epic1:haiku:A0:0:i6: strict=false build=false visible=false holdout=false blocks=0 review=- $1.01 565s
+[pilot7] 2026-08-02T16:23:01.754Z epic1:haiku:A0:0:i7: strict=false build=false visible=false holdout=false blocks=0 review=- $1.67 905s
+[pilot7] 2026-08-02T16:31:15.418Z epic1:haiku:A0:0:i8: strict=false build=false visible=false holdout=false blocks=0 review=- $0.77 494s
+[pilot7] 2026-08-02T16:34:46.082Z EPIC epic1:haiku:A0:0: strict=false integration=false endHoldouts=0/8 $6.91 74min
+[pilot7] 2026-08-02T16:34:47.128Z pilot7 complete. cumulative $263.17. journal: /home/thomas/workspace/harness-bench/results/pilot7.jsonl

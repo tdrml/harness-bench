@@ -117,10 +117,19 @@ for (const e of epics.values()) {
   e.cost = sum(seq.filter(Boolean).map((r) => r.costUsd ?? 0));
   e.wall = sum(seq.filter(Boolean).map((r) => r.wallSecTotal ?? 0));
   e.alarms = seq.filter((r) => r?.alarms?.length).map((r) => `${r.issue}:${r.alarms.join('|')}`);
-  // regression decay / repair, from the epic-end re-grade
-  const end = e.rollup?.endHoldouts ?? {};
-  e.decayed = ISSUES.filter((id) => e.issues.get(id)?.holdoutPass === true && end[id] === false);
-  e.repaired = ISSUES.filter((id) => e.issues.get(id)?.holdoutPass === false && end[id] === true);
+  // Regression decay / repair, from the epic-end re-grade - computed on
+  // ASSERTIONS, not on the typecheck-gated verdict. A single unrepaired type
+  // error makes tsc fail for every holdout in that package, so decay measured on
+  // the gated verdict reports every earlier issue as "regressed" when one thing
+  // broke. Assertions answer the question decay is actually asking: did a later
+  // issue break the BEHAVIOR an earlier one delivered?
+  const endA = e.rollup?.endAssertions ?? {};
+  const startA = (id) => e.issues.get(id)?.holdoutAssertionsGreen;
+  e.decayed = ISSUES.filter((id) => startA(id) === true && endA[id] === false);
+  e.repaired = ISSUES.filter((id) => startA(id) === false && endA[id] === true);
+  // Reported separately: the epic ended with a broken build, which makes every
+  // holdout's typecheck red regardless of behavior. One fact, not eight.
+  e.endBuildBroken = e.rollup?.endBuildGreen === false;
   e.epicStrict = e.rollup?.epicStrict === true;
   e.integrationPass = e.rollup?.integrationPass === true;
 }
@@ -233,6 +242,14 @@ if (alarmed.length) {
   console.log(`\n## Plausibility alarms — autopsy before counting these\n`);
   for (const e of alarmed) console.log(`- ${e.key}: ${e.alarms.join(', ')}`);
 }
+const broken = [...epics.values()].filter((e) => e.endBuildBroken);
+if (broken.length) {
+  console.log(`\n## Epics that ended with a broken build\n`);
+  console.log(`Every holdout typecheck in the affected package is red in these runs, so`);
+  console.log(`their per-issue strict column understates own work. Count: ${broken.length}/${epics.size}.`);
+  for (const e of broken) console.log(`- ${e.key} (own work ${e.ownWorkIssues}/${e.completedIssues})`);
+}
+
 const decayAll = [...epics.values()].filter((e) => e.decayed.length);
 if (decayAll.length) {
   console.log(`\n## Regression decay — an issue's holdout went green then red\n`);
