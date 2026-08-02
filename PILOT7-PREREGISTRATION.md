@@ -284,3 +284,21 @@ run: **at epic scale the expensive failure is not doing an issue wrong, it is le
 the repository broken for everyone downstream.** It is also the sharpest possible
 motivation for the FULL arm, whose done-gate runs `build && test` and would have
 refused to let issue 5 stop.
+
+## Done-gate v2 validation (2026-08-02, before the FULL cells ran)
+
+The A0 cells run first in grid order, so the enforcement arm's new component would
+not have executed for roughly two hours. It was validated standalone first, against
+the pristine target:
+
+| case | vitest | build | gate verdict |
+|---|---|---|---|
+| clean repository | pass | pass | exit 0 — allows the stop |
+| one type error **in a test file** | **pass** | fail | exit 2 — **blocks**, counter → 1 |
+| same, after 3 blocks | pass | fail | exit 0 — saturation bound holds, counter stays 3 |
+
+The middle row is finding 17a reproduced deliberately: vitest transpiles per file and
+does not typecheck, so a type error in a test file passes the suite. **The v1 gate,
+which ran `pnpm test` alone, would have allowed that stop.** It is also exactly the
+defect the smoke epic's issue 5 shipped, and the reason the enforcement arm is
+expected to diverge here.
