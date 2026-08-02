@@ -293,6 +293,12 @@ function runHoldout(workdir, holdoutDirEntry) {
   return {
     pass: typesGreen && hold.status === 0,
     typesGreen,
+    // Recorded separately because the two halves fail for different reasons.
+    // `tsc --build` is per-package: once any issue leaves a type error anywhere
+    // in a package, EVERY later issue's holdout in that package is red no matter
+    // how good its own work was. The assertions still answer "did this issue do
+    // its job", so cascade can be told apart from incompetence at analysis time.
+    assertionsGreen: hold.status === 0,
     tail: (hold.stdout || '').split('\n').filter((l) => /×|Tests |Test Files/.test(l)).slice(-10),
     typeTail: typesGreen ? [] : `${types.stdout || ''}${types.stderr || ''}`.split('\n').filter((l) => /error TS/.test(l)).slice(-10),
   };
@@ -328,6 +334,7 @@ function scoreIssue(workdir, issueId, rec) {
   const hold = runHoldout(workdir, issueHoldoutEntry(issueId));
   rec.holdoutPass = hold.pass;
   rec.holdoutTypesGreen = hold.typesGreen;
+  rec.holdoutAssertionsGreen = hold.assertionsGreen;
   rec.holdoutTail = hold.tail;
   if (hold.typeTail?.length) rec.holdoutTypeTail = hold.typeTail;
 
@@ -470,7 +477,10 @@ async function runEpic(cell, rep) {
       const r = spawnSync('pnpm', ['-s', 'vitest', ...REPOS[EPIC.repo].vitestArgs, 'run', ...files], {
         cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 64 * 1024 * 1024,
       });
+      // combinedTypesGreen already gates this branch, so assertions == verdict
       rollup.endHoldouts[issue.id] = r.status === 0;
+      rollup.endAssertions = rollup.endAssertions || {};
+      rollup.endAssertions[issue.id] = r.status === 0;
     }
     if (gradeIntegration) {
       const integFile = Object.keys(EPIC.integration.files)[0];
@@ -488,7 +498,12 @@ async function runEpic(cell, rep) {
     rollup.endTypeTail = `${combinedTypes.stdout || ''}${combinedTypes.stderr || ''}`.split('\n').filter((l) => /error TS/.test(l)).slice(-15);
     for (const d of injected) rmSync(d, { force: true });
     spawnSync('pnpm', ['build'], { cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
-    for (const issue of plannedIssues) rollup.endHoldouts[issue.id] = runHoldout(workdir, issueHoldoutEntry(issue.id)).pass;
+    rollup.endAssertions = {};
+    for (const issue of plannedIssues) {
+      const h = runHoldout(workdir, issueHoldoutEntry(issue.id));
+      rollup.endHoldouts[issue.id] = h.pass;
+      rollup.endAssertions[issue.id] = h.assertionsGreen;
+    }
     if (gradeIntegration) {
       const integ = runHoldout(workdir, { taskDir: EPIC_DIR, map: EPIC.integration.files });
       rollup.integrationPass = integ.pass;

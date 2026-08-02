@@ -243,3 +243,44 @@ No graded run had executed at the time of this amendment. Both problems were fou
 by replaying the reference implementation commit by commit against the holdouts —
 a gate that costs one afternoon and would otherwise have produced a benchmark where
 correct implementations fail on issue 7 in every cell of the grid.
+
+## Amendment 3 — 2026-08-02, after the smoke epic, before the grid
+
+The smoke epic (bare haiku, all 8 issues) exposed a **measurement conflation** in the
+pre-registered per-issue metric, and one new field is added to resolve it. The
+`strict` definition itself is unchanged.
+
+What happened: haiku passed issues 1–4, then on issue 5 — extract a shared launch
+helper and migrate nine handlers — produced a **correct production refactor** whose
+holdout assertions passed 13/13, while leaving ten TypeScript errors in three
+pre-existing test files it had edited. Issues 6 and 7 then failed with **byte-identical
+errors, at identical line and column positions, in files they had no reason to touch**.
+
+`tsc --build` is per-package. Once any issue leaves a type error anywhere in a package,
+every later issue's holdout in that package fails its typecheck regardless of how good
+that issue's own work was. Issues 6 and 7 passed their own assertions 28/28 and 23/23
+and were still scored `strict: false`.
+
+That is a true statement about the epic — the repository really is broken, and an
+unrepaired build break really is a failure — but pooled as a per-issue proportion it
+reads as "haiku failed three issues", which the data contradicts. Haiku did all seven
+issues' work correctly and had **one** defect that cascaded into three red issues.
+
+Therefore, recorded from now on:
+
+- `holdoutAssertionsGreen` — the holdout's vitest verdict alone, per issue, and
+  `endAssertions` in the epic rollup.
+- The analyzer reports **own-work green** alongside **strict**, and lists
+  *cascade suspects*: issues whose assertions passed but whose strict verdict is red.
+  The gap between the two columns is the measured cost of cascade.
+
+`strict` remains `build ∧ visible ∧ holdout` exactly as pre-registered, and remains
+the headline. Nothing is re-scored; a field is added and a second view is reported.
+Cascade attribution stays an autopsy claim, not a computed one — the new column
+identifies candidates, it does not confirm them.
+
+This is the pilot's first substantive result, and it arrived before a single graded
+run: **at epic scale the expensive failure is not doing an issue wrong, it is leaving
+the repository broken for everyone downstream.** It is also the sharpest possible
+motivation for the FULL arm, whose done-gate runs `build && test` and would have
+refused to let issue 5 stop.

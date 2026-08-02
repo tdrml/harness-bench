@@ -104,6 +104,12 @@ for (const e of epics.values()) {
   }
   e.survival = s;
   e.strictIssues = seq.filter((r) => r?.strict).length;
+  // "Did this issue do its own job?" - assertions only. Once any issue leaves a
+  // type error in a package, tsc --build fails for EVERY later issue's holdout
+  // in that package regardless of its own work, so strict and own-work diverge
+  // after the first build break. The gap between them is the cost of cascade.
+  e.ownWorkIssues = seq.filter((r) => r?.holdoutAssertionsGreen).length;
+  e.cascadeSuspect = seq.filter((r) => r?.holdoutAssertionsGreen && !r?.strict).map((r) => r.issue);
   e.silentIssues = seq.filter((r) => r?.silent).length;
   e.blocks = sum(seq.filter(Boolean).map((r) => r.blocks ?? 0));
   e.reqChanges = seq.filter((r) => r?.reviewVerdict === 'REQUEST_CHANGES').length;
@@ -132,6 +138,7 @@ for (const model of ['haiku', 'sonnet', 'opus']) {
       integration: es.filter((e) => e.integrationPass).length,
       medSurvival: median(es.map((e) => e.survival)),
       issuesStrict: sum(es.map((e) => e.strictIssues)),
+      issuesOwnWork: sum(es.map((e) => e.ownWorkIssues)),
       issuesGraded: sum(es.map((e) => e.completedIssues)),
       silent: sum(es.map((e) => e.silentIssues)),
       decayed: sum(es.map((e) => e.decayed.length)),
@@ -172,12 +179,19 @@ for (const c of cells) {
 }
 
 console.log(`\n## Per-issue (informative only — issues within an epic are NOT independent)\n`);
-console.log('| cell | issues strict | silent | decayed | repaired | gate blocks | REQUEST_CHANGES | unparseable |');
-console.log('|---|---|---|---|---|---|---|---|');
+console.log('| cell | issues strict | own work green | silent | decayed | repaired | gate blocks | REQUEST_CHANGES | unparseable |');
+console.log('|---|---|---|---|---|---|---|---|---|');
 for (const c of cells) {
   console.log(
-    `| ${c.model}:${c.arm} | ${c.issuesStrict}/${c.issuesGraded} (${pct(c.issuesStrict, c.issuesGraded)}) | ${c.silent} | ${c.decayed} | ${c.repaired} | ${c.blocks} | ${c.reqChanges} | ${c.unparseable} |`,
+    `| ${c.model}:${c.arm} | ${c.issuesStrict}/${c.issuesGraded} (${pct(c.issuesStrict, c.issuesGraded)}) | ${c.issuesOwnWork}/${c.issuesGraded} (${pct(c.issuesOwnWork, c.issuesGraded)}) | ${c.silent} | ${c.decayed} | ${c.repaired} | ${c.blocks} | ${c.reqChanges} | ${c.unparseable} |`,
   );
+}
+console.log(`\n*own work green* = the issue's holdout ASSERTIONS passed. It can exceed strict once an earlier issue breaks the package typecheck, because tsc --build then fails every later holdout in that package. The gap is cascade, not incompetence.`);
+
+const cascaded = [...epics.values()].filter((e) => e.cascadeSuspect.length);
+if (cascaded.length) {
+  console.log(`\n## Cascade suspects — own work green but strict red (confirm by autopsy)\n`);
+  for (const e of cascaded) console.log(`- ${e.key}: ${e.cascadeSuspect.join(', ')}`);
 }
 
 console.log(`\n## Per-issue strict rate by position (does difficulty ride the sequence?)\n`);
