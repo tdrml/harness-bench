@@ -338,3 +338,30 @@ grid was restarted from zero rather than resumed.
 
 Nothing about this was visible in a pass/fail column. It was visible in a number that
 did not look plausible.
+
+## Note — reviewer turn exhaustion observed mid-grid (not patched)
+
+**Finding 2 has recurred, at a third scale.** Two of the first fifteen FULL-arm issues
+ended with the reviewer *dead* rather than dissenting: `is_error: true`,
+`num_turns: 26` against a 25-turn budget, `stop_reason: "tool_use"`, no verdict
+emitted at all. Both are recorded as `UNPARSEABLE`.
+
+This is the same failure the study documented in pilot 2 at a 4-turn budget (raised
+to 20) and again as a 2-of-36 residual in pilot 5. At epic scale the diffs are much
+larger — sixteen-plus files — and the reviewer reads repository files to check the
+diff's claims, so 25 turns is once more not enough. **A review stage that can fail
+without failing the pipeline will, on some fraction of runs, silently not review.**
+
+**Decision: the budget is NOT being raised mid-grid.** The arms were pre-registered
+and `FULL` has to mean one thing across all eighteen epics; patching it now would
+make early and late epics incomparable, which is a worse defect than a known,
+measured one. Two consequences, both stated up front:
+
+1. The reviewer-death rate is reported as a result — a harness failure mode measured
+   in its third distinct configuration, not an incident.
+2. **The arm comparison becomes conservative.** If `FULL` beats `A0` while roughly an
+   eighth of its review stages silently did not run, the effect is not an artifact of
+   the harness working perfectly. It is a floor on the harness's value, not a ceiling.
+
+A follow-up pilot can raise the budget and measure what the fully-functional reviewer
+adds. That is a cleaner experiment than a grid whose arm definition changed halfway.
