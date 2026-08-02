@@ -77,13 +77,19 @@ const epicsDone = new Set();
 const issuesDone = new Map(); // epicKey -> Set(issueId)
 if (existsSync(JOURNAL)) {
   const lines = existsSync(JOURNAL) ? readFileSync(JOURNAL, 'utf8').split('\n').filter(Boolean) : [];
-  // Append-only invalidation: a later `invalidate` event voids an epic's earlier
-  // records without rewriting them. Journal lines are never edited or deleted.
-  const voided = new Set(lines.map((l) => JSON.parse(l)).filter((r) => r.event === 'invalidate').map((r) => r.epicKey));
+  // Append-only invalidation, applied POSITIONALLY: an `invalidate` event voids
+  // only the records for that epicKey written BEFORE it. Voiding by key for all
+  // time is wrong - an epicKey gets reused when a voided run is re-executed, and
+  // a key-wide filter would silently discard the replacement run too. Cost still
+  // accumulates from voided records: the money was spent either way.
   for (const line of lines) {
     const rec = JSON.parse(line);
     if (rec.invalidated) continue; // excluded from resume + analysis, retained for audit
-    if (voided.has(rec.epicKey)) continue;
+    if (rec.event === 'invalidate') {
+      issuesDone.delete(rec.epicKey);
+      epicsDone.delete(rec.epicKey);
+      continue;
+    }
     if (rec.event === 'issue') {
       globalCost += rec.costUsd ?? 0;
       if (!issuesDone.has(rec.epicKey)) issuesDone.set(rec.epicKey, new Set());

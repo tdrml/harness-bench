@@ -26,9 +26,18 @@ if (!existsSync(JOURNAL)) {
 }
 
 const recs = readFileSync(JOURNAL, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-// Append-only invalidation: an `invalidate` event voids that epic's records.
-const voided = new Set(recs.filter((r) => r.event === 'invalidate').map((r) => r.epicKey));
-const live = recs.filter((r) => !r.invalidated && !voided.has(r.epicKey));
+// Append-only invalidation, applied POSITIONALLY: an `invalidate` event voids
+// only the records for that epicKey that precede it. A voided run's epicKey is
+// reused when it is re-executed, so a key-wide filter would drop the good run
+// along with the bad one.
+const live = [];
+for (const r of recs) {
+  if (r.event === 'invalidate') {
+    for (let i = live.length - 1; i >= 0; i--) if (live[i].epicKey === r.epicKey) live.splice(i, 1);
+    continue;
+  }
+  if (!r.invalidated) live.push(r);
+}
 const issueRecs = live.filter((r) => r.event === 'issue' && r.rep !== 0);
 const epicRecs = live.filter((r) => r.event === 'epic' && r.rep !== 0);
 const invalidated = recs.filter((r) => r.invalidated);
