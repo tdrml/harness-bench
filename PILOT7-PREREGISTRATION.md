@@ -208,3 +208,38 @@ output. The clause is removed; the instruction to verify with
 No graded run had executed at the time of this amendment (only a one-issue plumbing
 test of the runner, journaled at `rep: 0` and excluded from analysis). Recorded here
 rather than edited into the design silently, per the study's append-only convention.
+
+## Amendment 2 — 2026-08-02, before any graded run
+
+The calibration gate caught a **specification bug in issue 7's brief**, which is
+exactly what it exists to do.
+
+`clampToProjectType` was specified as "`min` is raised to `chapterMin` when below
+it, `max` is lowered to `chapterMax` when above it." That rule is silent on a range
+lying entirely *outside* the band. The reference implementation followed it
+literally and, for a NOVEL project resolving to `{8000, 12000}` against the band
+`[3000, 5000]`, returned `{min: 8000, max: 5000}` — a range whose minimum exceeds
+its maximum. The holdout author had independently assumed a sane reading and
+asserted something else. Neither was wrong; the brief was.
+
+The brief now pins both endpoints explicitly as formulas:
+
+```
+min: Math.min(Math.max(range.min, chapterMin), chapterMax)
+max: Math.min(Math.max(range.max, chapterMin), chapterMax)
+```
+
+so an out-of-band range collapses onto the nearer bound (`{5000, 5000}`) instead of
+inverting. The reference and the i7 holdouts were brought into line, and the
+degenerate case is now graded explicitly rather than left implicit.
+
+Also in this amendment: issue 6's holdout asserted the marketer prompt matched
+`/\b7\b[^\n]{0,40}keywords/`, which requires the digit to precede the noun. The
+brief pins that the prompt states the counts, not the sentence shape — "keywords
+must contain exactly 7 entries" satisfies it. The assertion is now order-agnostic.
+That one was a holdout over-specification, not a brief bug.
+
+No graded run had executed at the time of this amendment. Both problems were found
+by replaying the reference implementation commit by commit against the holdouts —
+a gate that costs one afternoon and would otherwise have produced a benchmark where
+correct implementations fail on issue 7 in every cell of the grid.

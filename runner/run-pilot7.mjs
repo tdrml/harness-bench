@@ -307,6 +307,11 @@ function scoreIssue(workdir, issueId, rec) {
   const isTest = (f) => /__tests__\/|\.test\.ts$/.test(f);
   rec.testEdits = [...changed.filter(isTest), ...untracked.filter(isTest)];
   rec.changedFiles = changed.concat(untracked);
+  // `git diff --shortstat` ignores untracked files, so a whole new module reads
+  // as "1 file changed". Intent-to-add makes new files count without staging
+  // their contents; diff size is a pre-registered discipline proxy, so it has
+  // to include the code the agent actually wrote.
+  sh('git add -A -N', { cwd: workdir });
   rec.diffstat = sh('git diff --shortstat HEAD', { cwd: workdir }).trim();
 
   const hold = runHoldout(workdir, issueHoldoutEntry(issueId));
@@ -448,8 +453,10 @@ async function runEpic(cell, rep) {
   rollup.endHoldouts = {};
   if (combinedTypesGreen) {
     for (const issue of plannedIssues) {
-      const file = Object.keys(issueHoldoutEntry(issue.id).map)[0];
-      const r = spawnSync('pnpm', ['-s', 'vitest', ...REPOS[EPIC.repo].vitestArgs, 'run', `zz-${file}`], {
+      // An issue's holdout can span several packages (i4 grades the handler,
+      // the CDK stack and the worker loader), so filter on every file it owns.
+      const files = Object.keys(issueHoldoutEntry(issue.id).map).map((f) => `zz-${f}`);
+      const r = spawnSync('pnpm', ['-s', 'vitest', ...REPOS[EPIC.repo].vitestArgs, 'run', ...files], {
         cwd: workdir, encoding: 'utf8', timeout: 600000, maxBuffer: 64 * 1024 * 1024,
       });
       rollup.endHoldouts[issue.id] = r.status === 0;

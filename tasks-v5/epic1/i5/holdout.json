@@ -1,0 +1,3 @@
+{
+  "holdout.i5.test.ts": "packages/lambdas/src/handlers/__tests__"
+}

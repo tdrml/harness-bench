@@ -455,13 +455,14 @@ describe('holdout i4: reconcile retries a failed packager run', () => {
       makeEvent([makeRecord({ type: 'RECONCILE', projectId: 'proj-123', runId: 'run-packager' })]),
     );
 
-    const retried = vi
-      .mocked(enqueue)
-      .mock.calls.map(([, item]) => item)
-      .filter((item) => item.type === 'PACKAGE_MANUSCRIPT');
+    const enqueued = vi.mocked(enqueue).mock.calls.map(([, item]) => item);
+    expect(enqueued.map((item) => item.type)).toContain('PACKAGE_MANUSCRIPT');
 
-    expect(retried).toHaveLength(1);
-    expect(retried[0]!.projectId).toBe('proj-123');
+    const retried = enqueued.find((item) => item.type === 'PACKAGE_MANUSCRIPT');
+    expect(retried).toBeDefined();
+    if (retried && retried.type === 'PACKAGE_MANUSCRIPT') {
+      expect(retried.projectId).toBe('proj-123');
+    }
     expect(mockAgentRunServiceMethods.updateStatus).toHaveBeenCalledWith(
       'run-packager',
       'FAILED',

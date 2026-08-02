@@ -1,0 +1,4 @@
+{
+  "holdout.i7.test.ts": "packages/core/src/word-count-policy/__tests__",
+  "holdout.i7.lambdas.test.ts": "packages/lambdas/src/handlers/__tests__"
+}

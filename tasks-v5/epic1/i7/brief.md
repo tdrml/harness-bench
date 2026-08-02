@@ -62,10 +62,19 @@ export function clampToProjectType(params: {
 }): { min: number; max: number }
 ```
 
-   to the new module: it clamps a resolved range into the project type's
-   `[chapterMin, chapterMax]` band — `min` is raised to `chapterMin` when below it,
-   `max` is lowered to `chapterMax` when above it. Wire it into the **merge** gate
-   only; the other stages keep the unclamped range.
+   to the new module. It clamps **both** endpoints of `range` into the project
+   type's `[chapterMin, chapterMax]` band:
+
+   - `min: Math.min(Math.max(range.min, chapterMin), chapterMax)`
+   - `max: Math.min(Math.max(range.max, chapterMin), chapterMax)`
+
+   Clamping both endpoints — rather than only raising `min` and only lowering
+   `max` — is what keeps the result a valid range: a resolved band lying entirely
+   outside the project type's band collapses onto the nearer bound instead of
+   inverting into a `min` greater than its `max`.
+
+   Wire it into the **merge** gate only; the other stages keep the unclamped
+   range.
 
 Existing tests that assert word-count boundaries will need updating where these
 pinned semantics legitimately change the numbers. Do not weaken them.

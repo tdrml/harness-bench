@@ -1,0 +1,5 @@
+{
+  "holdout.i6.test.ts": "packages/lambdas/src/handlers/__tests__",
+  "holdout.i6.cdk.test.ts": "packages/cdk/src/__tests__",
+  "holdout.i6.worker.test.ts": "packages/worker/src/__tests__"
+}
