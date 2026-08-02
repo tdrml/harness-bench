@@ -134,10 +134,17 @@ for (const e of epics.values()) {
   e.integrationPass = e.rollup?.integrationPass === true;
 }
 
+// Only epics that produced a rollup are analyzable. An epic still running - or
+// one cut short by the cost ceiling - has issue records but no verdict, and
+// counting it as a non-strict epic would silently score incomplete work as
+// failed work.
+const complete = [...epics.values()].filter((e) => e.rollup);
+const incomplete = [...epics.values()].filter((e) => !e.rollup);
+
 const cells = [];
 for (const model of ['haiku', 'sonnet', 'opus']) {
   for (const arm of ['A0', 'FULL']) {
-    const es = [...epics.values()].filter((e) => e.model === model && e.arm === arm);
+    const es = complete.filter((e) => e.model === model && e.arm === arm);
     if (!es.length) continue;
     cells.push({
       model,
@@ -170,7 +177,10 @@ if (asJson) {
 // --- output -----------------------------------------------------------------
 const spend = sum(live.filter((r) => r.event === 'issue').map((r) => r.costUsd ?? 0));
 console.log(`\n# harness-bench pilot 7 — epic scale\n`);
-console.log(`epics: ${epics.size} · graded issues: ${issueRecs.length} · spend this pilot: $${spend.toFixed(2)}`);
+console.log(`epics: ${complete.length} complete${incomplete.length ? ` (+${incomplete.length} in progress, excluded)` : ''} · graded issues: ${issueRecs.length} · spend this pilot: $${spend.toFixed(2)}`);
+if (incomplete.length) {
+  console.log(`in progress: ${incomplete.map((e) => `${e.key} (${e.completedIssues}/${ISSUES.length})`).join(', ')}`);
+}
 if (invalidated.length) console.log(`invalidated (excluded, retained for audit): ${invalidated.length}`);
 if (calibration.length) {
   const bad = calibration.filter((c) => !c.ok);
@@ -197,7 +207,7 @@ for (const c of cells) {
 }
 console.log(`\n*own work green* = the issue's holdout ASSERTIONS passed. It can exceed strict once an earlier issue breaks the package typecheck, because tsc --build then fails every later holdout in that package. The gap is cascade, not incompetence.`);
 
-const cascaded = [...epics.values()].filter((e) => e.cascadeSuspect.length);
+const cascaded = complete.filter((e) => e.cascadeSuspect.length);
 if (cascaded.length) {
   console.log(`\n## Cascade suspects — own work green but strict red (confirm by autopsy)\n`);
   for (const e of cascaded) console.log(`- ${e.key}: ${e.cascadeSuspect.join(', ')}`);
@@ -218,7 +228,9 @@ for (const c of cells) {
 console.log(`\n## Fisher exact (two-sided), epic as the unit\n`);
 const cell = (m, a) => cells.find((c) => c.model === m && c.arm === a);
 const contrast = (label, x, y) => {
-  if (!x || !y) return;
+  // A contrast against an empty cell is not a comparison; printing p=1.000 for
+  // it invites reading absence of data as absence of effect.
+  if (!x || !y || !x.n || !y.n) return;
   const p = fisher(x.epicStrict, x.n - x.epicStrict, y.epicStrict, y.n - y.epicStrict);
   console.log(`- ${label}: ${x.epicStrict}/${x.n} vs ${y.epicStrict}/${y.n} — p=${p.toFixed(3)}`);
 };
@@ -237,12 +249,12 @@ contrast('sonnet vs haiku (both arms)', tier('sonnet'), tier('haiku'));
 contrast('opus vs sonnet (both arms)', tier('opus'), tier('sonnet'));
 
 // --- things that need a human ----------------------------------------------
-const alarmed = [...epics.values()].filter((e) => e.alarms.length);
+const alarmed = complete.filter((e) => e.alarms.length);
 if (alarmed.length) {
   console.log(`\n## Plausibility alarms — autopsy before counting these\n`);
   for (const e of alarmed) console.log(`- ${e.key}: ${e.alarms.join(', ')}`);
 }
-const broken = [...epics.values()].filter((e) => e.endBuildBroken);
+const broken = complete.filter((e) => e.endBuildBroken);
 if (broken.length) {
   console.log(`\n## Epics that ended with a broken build\n`);
   console.log(`Every holdout typecheck in the affected package is red in these runs, so`);
@@ -250,12 +262,12 @@ if (broken.length) {
   for (const e of broken) console.log(`- ${e.key} (own work ${e.ownWorkIssues}/${e.completedIssues})`);
 }
 
-const decayAll = [...epics.values()].filter((e) => e.decayed.length);
+const decayAll = complete.filter((e) => e.decayed.length);
 if (decayAll.length) {
   console.log(`\n## Regression decay — an issue's holdout went green then red\n`);
   for (const e of decayAll) console.log(`- ${e.key}: ${e.decayed.join(', ')} regressed by epic end`);
 }
-const repairAll = [...epics.values()].filter((e) => e.repaired.length);
+const repairAll = complete.filter((e) => e.repaired.length);
 if (repairAll.length) {
   console.log(`\n## Repair — a failed issue was fixed by later work\n`);
   for (const e of repairAll) console.log(`- ${e.key}: ${e.repaired.join(', ')}`);
