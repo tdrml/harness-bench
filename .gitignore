@@ -4,3 +4,4 @@ runs/
 node_modules/
 .pristine-autograph/
 .reference-epic1/
+.calib-scratch/
