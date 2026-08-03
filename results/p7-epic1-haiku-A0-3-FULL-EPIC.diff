@@ -1,0 +1,4590 @@
+diff --git a/README.md b/README.md
+index e3bd98f..9e9518b 100644
+--- a/README.md
++++ b/README.md
+@@ -16,7 +16,8 @@ A user creates a "kickoff" issue on a (private) orchestration repo with a `kicko
+ Kickoff Issue → Bootstrap Project → Create Repo → Generate Outline → Plan Chapters
+     → Create Issues → Write Chapters (parallel batches) → Editorial Review
+     → Revise (if needed) → Merge → Continuity Check → Next Chapters
+-    → Continuity Audit → Final Review
++    → Continuity Audit → Continuity Fix → Final Review → Package Manuscript
++    → Generate Listing → Release
+ ```
+ 
+ Each chapter goes through a writing loop:
+@@ -35,8 +36,8 @@ Continuity state (character positions, timeline, plot threads, established facts
+ 
+ AWS-native serverless architecture:
+ 
+-- **15 Lambda handlers** — one per pipeline stage, event-driven via SQS FIFO
+-- **7 ECS Fargate workers** — long-running Claude Code CLI tasks (outliner, planner, writer, editor, reviser, continuity-checker, auditor)
++- **17 Lambda handlers** — one per pipeline stage, event-driven via SQS FIFO
++- **10 ECS Fargate workers** — long-running Claude Code CLI tasks (outliner, planner, writer, editor, reviser, continuity-checker, auditor, fixer, packager, marketer)
+ - **Step Functions** — orchestrates async ECS polling without busy-wait
+ - **DynamoDB** — 5 tables (projects, task-graphs, agent-runs, task-outputs, repo-locks)
+ - **SQS FIFO** — work-item queue with per-project message grouping
+@@ -69,7 +70,10 @@ packages/
+ | **continuity-check** | Launches continuity-checker ECS task, loads existing state from repo |
+ | **trigger-next-chapter** | Finds ready nodes in dependency DAG, respects concurrency limit |
+ | **continuity-audit** | Launches auditor ECS task for holistic full-book continuity audit after all chapters merge |
+-| **final-review** | Tallies word counts, marks project complete |
++| **continuity-fixer** | Launches fixer ECS task to auto-correct continuity issues flagged by auditor |
++| **final-review** | Tallies word counts, enqueues packaging phase |
++| **package-manuscript** | Launches packager ECS task to assemble final manuscript and metadata |
++| **generate-listing** | Launches marketer ECS task to create KDP store listing |
+ 
+ A **reconcile-enqueuer** (EventBridge schedule) runs every 5 minutes to detect stalled agent runs and re-enqueue them.
+ 
+@@ -84,6 +88,9 @@ A **reconcile-enqueuer** (EventBridge schedule) runs every 5 minutes to detect s
+ | **reviser** | Incorporates editorial feedback, pushes revisions to same branch |
+ | **continuity-checker** | Audits cross-chapter consistency, produces state delta and report |
+ | **auditor** | Performs holistic full-book continuity audit across all chapters (120-min timeout) |
++| **fixer** | Auto-corrects continuity issues flagged by auditor |
++| **packager** | Assembles final manuscript into distributable format, creates metadata files |
++| **marketer** | Creates KDP store listing with title, blurb, keywords, and categories |
+ 
+ Workers fetch system prompts from DynamoDB via `RUN_ID` and execute the Claude Code CLI. All workers run on 2 vCPU / 8 GB Fargate tasks.
+ 
+diff --git a/docs/HLD.md b/docs/HLD.md
+index 2c60858..7792412 100644
+--- a/docs/HLD.md
++++ b/docs/HLD.md
+@@ -32,13 +32,13 @@ The shared foundation consumed by all other packages.
+ | `github/` | Octokit wrapper for repo creation, issue management, PR lifecycle |
+ | `logger/` | Structured JSON logging with correlation IDs |
+ | `merge-policy/` | Merge readiness evaluation against editorial criteria (word count gate, review approval, continuity pass) |
+-| `prompts/` | System prompt templates for all six agent types (outliner, planner, writer, editor, reviser, continuity-checker) |
++| `prompts/` | System prompt templates for all ten agent types (outliner, planner, writer, editor, reviser, continuity-checker, auditor, fixer, packager, marketer) |
+ | `queue/` | SQS work-item type definitions and enqueue helper |
+ | `writing/` | Writing-domain utilities: continuity tracking, word count validation, chapter markdown parsing, style checking |
+ 
+ ### 2.2 Lambda Handlers (`@auto-graph/lambdas`)
+ 
+-Fourteen event-driven Lambda functions, each handling one work-item type.
++Seventeen event-driven Lambda functions, each handling one work-item type.
+ 
+ | Handler | Trigger | Responsibility |
+ |---|---|---|
+@@ -55,11 +55,16 @@ Fourteen event-driven Lambda functions, each handling one work-item type.
+ | `merge-chapter` | SQS | Merge approved chapter PR, enqueue `CONTINUITY_CHECK` |
+ | `continuity-check` | SQS | Launch continuity-checker ECS task, update continuity state |
+ | `trigger-next-chapter` | SQS | Find next chapter(s) with satisfied dependencies, enqueue `TRIGGER_CHAPTER` |
++| `continuity-audit` | SQS | Launch auditor ECS task for full-book continuity audit, enqueue `CONTINUITY_FIX` |
++| `continuity-fixer` | SQS | Launch fixer ECS task to auto-correct continuity issues, enqueue `FINAL_REVIEW` |
++| `final-review` | SQS | Tally word counts, enqueue `PACKAGE_MANUSCRIPT` |
++| `package-manuscript` | SQS | Launch packager ECS task to assemble manuscript, enqueue `GENERATE_LISTING` |
++| `generate-listing` | SQS | Launch marketer ECS task to create store listing, enqueue `RECONCILE` |
+ | `webhook-handler` | API Gateway | Receive GitHub webhooks (PR events), route to appropriate handler |
+ 
+ ### 2.3 ECS Workers (`@auto-graph/worker`)
+ 
+-Six purpose-built Fargate task definitions, each running Claude Code CLI with a domain-specific system prompt.
++Ten purpose-built Fargate task definitions, each running Claude Code CLI with a domain-specific system prompt.
+ 
+ | Worker | Purpose | Resources |
+ |---|---|---|
+@@ -69,6 +74,10 @@ Six purpose-built Fargate task definitions, each running Claude Code CLI with a
+ | `editor` | Editorial review against writing criteria | 0.5 vCPU / 2 GB |
+ | `reviser` | Revise chapter based on editorial feedback | 1 vCPU / 4 GB |
+ | `continuity-checker` | Cross-chapter consistency audit | 0.5 vCPU / 2 GB |
++| `auditor` | Full-book continuity audit, identifies accumulated contradictions | 1 vCPU / 4 GB |
++| `fixer` | Auto-correct continuity issues flagged by auditor | 1 vCPU / 4 GB |
++| `packager` | Assemble final manuscript, create metadata and distribution files | 0.5 vCPU / 2 GB |
++| `marketer` | Create KDP store listing with metadata, keywords, categories | 0.5 vCPU / 2 GB |
+ 
+ ### 2.4 CDK Infrastructure (`@auto-graph/cdk`)
+ 
+@@ -126,9 +135,37 @@ User creates kickoff issue on orchestration repo
+                     │                        │
+                     ▼                        ▼
+               ┌───────────────────────────────┐
++              │   CONTINUITY_AUDIT            │
++              │  (full-book audit)            │
++              └───────────────────────────────┘
++                         │
++                         ▼
++              ┌───────────────────────────────┐
++              │    CONTINUITY_FIX             │
++              │  (auto-correct issues)        │
++              └───────────────────────────────┘
++                         │
++                         ▼
++              ┌───────────────────────────────┐
+               │       FINAL_REVIEW            │
+-              │  (full manuscript continuity   │
+-              │   audit after all chapters)    │
++              │  (tally word counts)          │
++              └───────────────────────────────┘
++                         │
++                         ▼
++              ┌───────────────────────────────┐
++              │   PACKAGE_MANUSCRIPT          │
++              │  (assemble for distribution)  │
++              └───────────────────────────────┘
++                         │
++                         ▼
++              ┌───────────────────────────────┐
++              │    GENERATE_LISTING           │
++              │  (create store metadata)      │
++              └───────────────────────────────┘
++                         │
++                         ▼
++              ┌───────────────────────────────┐
++              │  PROJECT RELEASED             │
+               └───────────────────────────────┘
+ ```
+ 
+diff --git a/packages/cdk/src/__tests__/auto-graph-stack.test.ts b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+index c55de96..1d7b1e4 100644
+--- a/packages/cdk/src/__tests__/auto-graph-stack.test.ts
++++ b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+@@ -186,8 +186,8 @@ describe('AutoGraphStack', () => {
+   });
+ 
+   describe('ECS Task Definitions', () => {
+-    it('creates exactly 8 Fargate task definitions', () => {
+-      template.resourceCountIs('AWS::ECS::TaskDefinition', 8);
++    it('creates exactly 10 Fargate task definitions', () => {
++      template.resourceCountIs('AWS::ECS::TaskDefinition', 10);
+     });
+ 
+     it('creates outliner task def with 2 vCPU / 8 GB', () => {
+@@ -262,6 +262,24 @@ describe('AutoGraphStack', () => {
+         RequiresCompatibilities: ['FARGATE'],
+       });
+     });
++
++    it('creates packager task def with 2 vCPU / 8 GB', () => {
++      template.hasResourceProperties('AWS::ECS::TaskDefinition', {
++        Family: 'test-packager',
++        Cpu: '2048',
++        Memory: '8192',
++        RequiresCompatibilities: ['FARGATE'],
++      });
++    });
++
++    it('creates marketer task def with 2 vCPU / 8 GB', () => {
++      template.hasResourceProperties('AWS::ECS::TaskDefinition', {
++        Family: 'test-marketer',
++        Cpu: '2048',
++        Memory: '8192',
++        RequiresCompatibilities: ['FARGATE'],
++      });
++    });
+   });
+ 
+   describe('Lambda functions', () => {
+diff --git a/packages/cdk/src/constructs/compute.ts b/packages/cdk/src/constructs/compute.ts
+index 3f1bbdd..4de2608 100644
+--- a/packages/cdk/src/constructs/compute.ts
++++ b/packages/cdk/src/constructs/compute.ts
+@@ -33,6 +33,8 @@ const TASK_CONFIGS: TaskConfig[] = [
+   { name: 'continuity-checker', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 15 },
+   { name: 'auditor', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 120 },
+   { name: 'fixer', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 60 },
++  { name: 'packager', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 30 },
++  { name: 'marketer', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 15 },
+ ];
+ 
+ function toPascalCase(str: string): string {
+diff --git a/packages/core/src/dynamodb/types.ts b/packages/core/src/dynamodb/types.ts
+index 0c391e4..ff913dd 100644
+--- a/packages/core/src/dynamodb/types.ts
++++ b/packages/core/src/dynamodb/types.ts
+@@ -10,6 +10,9 @@ export type ProjectStatus =
+   | 'PLANNING'
+   | 'WRITING'
+   | 'REVIEWING'
++  | 'PACKAGING'
++  | 'RELEASING'
++  | 'RELEASED'
+   | 'COMPLETE'
+   | 'FAILED';
+ 
+@@ -77,7 +80,9 @@ export type WorkerType =
+   | 'reviser'
+   | 'continuity-checker'
+   | 'auditor'
+-  | 'fixer';
++  | 'fixer'
++  | 'packager'
++  | 'marketer';
+ 
+ export type AgentRunStatus =
+   | 'PENDING'
+diff --git a/packages/core/src/index.ts b/packages/core/src/index.ts
+index e0172d6..86fb3dd 100644
+--- a/packages/core/src/index.ts
++++ b/packages/core/src/index.ts
+@@ -9,3 +9,5 @@ export * from './writing/index.js';
+ export * from './prompts/index.js';
+ export * from './merge-policy/index.js';
+ export * from './templates/index.js';
++export * from './release-policy/index.js';
++export * from './word-count-policy/index.js';
+diff --git a/packages/core/src/prompts/editor.ts b/packages/core/src/prompts/editor.ts
+index f9e1dbc..a104b0a 100644
+--- a/packages/core/src/prompts/editor.ts
++++ b/packages/core/src/prompts/editor.ts
+@@ -3,6 +3,7 @@ import type { Style } from '../config/types.js';
+ import { ProjectType } from '../config/schemas.js';
+ import { pruneContinuityState } from '../writing/continuity.js';
+ import { buildSharedPreamble } from './shared.js';
++import { formatToleranceForPrompt } from '../word-count-policy/index.js';
+ 
+ export interface EditorPromptParams {
+   chapterNumber: number;
+@@ -67,7 +68,7 @@ function buildVerdictThresholdNote(band: RoundBand): string {
+  * Built around scene-grade craft: scene structure, distinct character voices, subtext,
+  * climax execution, and the AI-fiction-cliche watchlist.
+  */
+-function buildFictionCriteria(wordCountTarget: number, seriesBookNumber: number | undefined): string {
++function buildFictionCriteria(wordCountTarget: number, seriesBookNumber: number | undefined, tolerance: string): string {
+   return `## Review Criteria
+ 
+ Evaluate the chapter against every criterion below. For each criterion, scan the entire chapter — do not stop at the first issue. Apply each criterion to the whole draft, not only the first scene.
+@@ -75,7 +76,7 @@ Evaluate the chapter against every criterion below. For each criterion, scan the
+ 1. **Plot Consistency.** Does the chapter follow the master outline? Are all key plot events present? Does the structural-beat label in the outline match what the chapter actually delivers? Does the chapter plant the setups it was supposed to plant and pay off the setups it was supposed to pay off?
+ 2. **Character Voice.** Do characters speak and act in ways consistent with their character-bible profiles? Do the voice signatures hold — vocabulary, syntax, what each character hides behind? In multi-character scenes, are the voices distinct enough that a reader could tell who is speaking without dialogue tags?
+ 3. **Pacing and Scene Structure.** Does each scene have a clear objective, obstacle, escalation, and turn? Do scenes earn their length? Does tension rise across the chapter, or does it sit flat? Is there a chapter-opening hook in motion? Does the chapter close on a beat the reader carries forward?
+-4. **Word Count Compliance.** Is the word count within ±10% of the target (${wordCountTarget.toLocaleString()} words)?
++4. **Word Count Compliance.** Is the word count within ${tolerance} of the target (${wordCountTarget.toLocaleString()} words)?
+ 5. **Style Adherence.** Tense, POV, and voice as specified in the style guide. Apply this to every paragraph; flag any slip into present tense in a past-tense book, any POV shift, any tonal drift.
+ 6. **Prose Quality.** Specific over generic? Sentence rhythm varied? Sensory grounding present? Or does the prose lean on AI clichés ("she felt a sense of...", "his heart raced", "eyes like...", "the silence was deafening", "couldn't help but...", filtering through verbs of perception, empty modifiers like "very/really/quite", adverbs replacing strong verbs)? Flag specific lines, not abstract complaints.
+ 7. **Subtext and Dialogue.** Do characters speak around their feelings rather than directly stating them, except at moments where direct declaration is earned? Or is dialogue functioning as exposition delivery? Flag any line that exists only to inform the reader rather than to advance the scene.
+@@ -97,7 +98,7 @@ Evaluate the chapter against every criterion below. For each criterion, scan the
+  * criterion that absorbs fabrication, missing citation, missing hedge, and
+  * unsourced specifics.
+  */
+-function buildNonFictionCriteria(wordCountTarget: number, seriesBookNumber: number | undefined): string {
++function buildNonFictionCriteria(wordCountTarget: number, seriesBookNumber: number | undefined, tolerance: string): string {
+   return `## Review Criteria
+ 
+ You are reviewing **reported non-fiction** about real, living subjects. The standard is the kind of long-form Inc. or Bloomberg Businessweek profile a fact-checker would clear: every named fact traceable to a public source, every direct quote attributed to its publication, every analytical inference explicitly hedged. Do not treat this as a novel.
+@@ -112,7 +113,7 @@ Evaluate the chapter against every criterion below. For each, scan the entire ch
+    - **SOURCING / UNSOURCED SPECIFIC** — a specific number, date, or named entity asserted without a sourceable anchor. The fix is either citation, hedging, or removal.
+ 3. **Subject Fidelity.** This replaces fictional "character voice" for non-fiction. Real, living subjects must be rendered from what the public record establishes about them — published interviews, essays, panels, podcast appearances, LinkedIn posts, press coverage. Flag any depiction that asserts traits, opinions, or behaviors the public record does not support. When the chapter quotes a named subject, the quote must be verbatim from a citable source; do not paraphrase quoted material as if it were quoted material.
+ 4. **Argument and Flow.** This replaces fictional "pacing and scene structure" for non-fiction. Does the chapter make a clear analytical argument? Is the argument grounded in cited specifics rather than generality? Does the analysis flow logically — claim, evidence, implication — or does it drift between unconnected anecdotes? If the chapter has a structural anchor in the outline (a founding decision, a recognition payoff, a pivot), is that anchor *landed* through cited evidence rather than merely asserted? Note: do NOT demand "scene-grade" rendering or "show, don't tell" beats here — analytical rendering is the genre default for reported non-fiction; only flag if the chapter is *unspecific*, not if it is *analytical*.
+-5. **Word Count Compliance.** Is the word count within ±10% of the target (${wordCountTarget.toLocaleString()} words)?
++5. **Word Count Compliance.** Is the word count within ${tolerance} of the target (${wordCountTarget.toLocaleString()} words)?
+ 6. **Style Adherence.** Tense, POV, and voice as specified in the style guide. Apply this to every paragraph; flag tense slips, POV shifts, and tonal drift. For non-fiction specifically, watch for: present-tense slips in analytical passages ("the platform *is*..." in a past-tense book), and sourcing meta-commentary ("according to the public record we reviewed...") that belongs in the front-matter "On Sourcing" note rather than in the chapter prose.
+ 7. **Prose Quality.** Sentence rhythm varied? Specific over generic? Or does the prose lean on AI tics — repeated rhetorical scaffolding ("the kind of X", "What X taught / bought / added"), inversion-aphorism patterns ("X did not Y. The Y was the X."), hyphen-stack noun phrases, mixed metaphors, abstract modifiers ("very", "really", "quite"), filtering through verbs of perception, adverbs replacing strong verbs? Flag specific lines, not abstract complaints. Do NOT flag fictional "show vs tell" issues; analytical prose telling a reader what a system did is correct for this genre.
+ 8. **Factual Continuity.** This is the non-fiction reframing of fictional continuity. Cross-check the chapter against the master outline, the character bible, the world bible, and the continuity state above. Specifically watch for: date conflicts (year of an event, year of a transition, decade of a trend), tenure math (someone "spent four months" but the chapter places them on the floor for a year), organizational structure (Meridian Holdings vs. Meridian Collective vs. Meridian Pulse kept distinct), named role titles, and direction-of-time errors (X happened "before" Y when it happened after). Quote both sides of any contradiction.${seriesBookNumber !== undefined ? `
+@@ -131,6 +132,7 @@ export function buildEditorPrompt(params: EditorPromptParams): string {
+     revisionRound = 0,
+   } = params;
+   const prunedState = pruneContinuityState(continuityState);
++  const tolerance = formatToleranceForPrompt('review');
+   const paddedChapter = String(chapterNumber).padStart(2, '0');
+ 
+   const isNonFiction = projectType === ProjectType.NON_FICTION;
+@@ -139,8 +141,8 @@ export function buildEditorPrompt(params: EditorPromptParams): string {
+   const verdictThresholdNote = buildVerdictThresholdNote(band);
+ 
+   const reviewCriteria = isNonFiction
+-    ? buildNonFictionCriteria(wordCountTarget, seriesBookNumber)
+-    : buildFictionCriteria(wordCountTarget, seriesBookNumber);
++    ? buildNonFictionCriteria(wordCountTarget, seriesBookNumber, tolerance)
++    : buildFictionCriteria(wordCountTarget, seriesBookNumber, tolerance);
+ 
+   const fictionCategoryList = `PLOT, CHARACTER, PACING, WORD_COUNT, STYLE, PROSE, CONTINUITY${seriesBookNumber !== undefined ? ', SERIES_CONTINUITY' : ''}`;
+   const nonFictionCategoryList = `PLOT, SOURCING, SUBJECT, ARGUMENT, WORD_COUNT, STYLE, PROSE, CONTINUITY${seriesBookNumber !== undefined ? ', SERIES_CONTINUITY' : ''}`;
+@@ -175,7 +177,7 @@ ${buildSharedPreamble()}
+ - **Voice**: ${style.voice}
+ - **Tense**: ${style.tense}
+ - **POV**: ${style.pov}
+-- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ±10%)
++- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ${tolerance})
+ 
+ <continuity_state>
+ \`\`\`json
+diff --git a/packages/core/src/prompts/index.ts b/packages/core/src/prompts/index.ts
+index 6ede6b0..60a3751 100644
+--- a/packages/core/src/prompts/index.ts
++++ b/packages/core/src/prompts/index.ts
+@@ -22,4 +22,10 @@ export type { AuditorPromptParams } from './auditor.js';
+ export { buildContinuityFixerPrompt } from './continuity-fixer.js';
+ export type { ContinuityFixerPromptParams } from './continuity-fixer.js';
+ 
++export { buildPackagerPrompt } from './packager.js';
++export type { PackagerPromptParams } from './packager.js';
++
++export { buildMarketerPrompt } from './marketer.js';
++export type { MarketerPromptParams } from './marketer.js';
++
+ export { buildSharedPreamble, GUARD_RAILS, CLI_INSTRUCTIONS, REPO_CONVENTIONS } from './shared.js';
+diff --git a/packages/core/src/prompts/marketer.ts b/packages/core/src/prompts/marketer.ts
+new file mode 100644
+index 0000000..74536de
+--- /dev/null
++++ b/packages/core/src/prompts/marketer.ts
+@@ -0,0 +1,86 @@
++import { ProjectType } from '../config/schemas.js';
++import { buildSharedPreamble } from './shared.js';
++import { REQUIRED_KEYWORD_COUNT, REQUIRED_CATEGORY_COUNT } from '../release-policy/types.js';
++
++export interface MarketerPromptParams {
++  title: string;
++  repoName: string;
++  genre: string;
++  projectType?: ProjectType | undefined;
++}
++
++export function buildMarketerPrompt(params: MarketerPromptParams): string {
++  const { title, repoName, genre, projectType } = params;
++
++  return `# Marketer Agent — System Prompt
++
++You are the Marketer agent. Your responsibility is to create a compelling store listing for the completed manuscript.
++
++${buildSharedPreamble()}
++
++## Context
++
++- **Repository**: ${repoName}
++- **Book title**: ${title}
++- **Genre**: ${genre}
++- **Type**: ${projectType ?? 'NOVEL'}
++
++## Your Task
++
++### Phase 1 — Research & Plan
++
++Before writing, read the manuscript to understand its content, tone, and unique selling points:
++
++1. Read \`manuscript/manuscript.md\` (the complete assembled manuscript)
++2. Read \`release/manifest.json\` to understand the project structure
++
++### Phase 2 — Create Store Listing
++
++Create the listing file at \`release/listing.json\` with this exact JSON structure:
++
++\`\`\`json
++{
++  "title": "Book Title",
++  "subtitle": "Optional subtitle",
++  "blurb": "Engaging multi-paragraph blurb that sells the book. Can include HTML tags: <b>, <i>, <u>, <br>, <p>, <ul>, <li>, <ol>, <h4>, <h5>, <h6>. Max 4000 characters.",
++  "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5", "keyword6", "keyword7"],
++  "categories": ["category1", "category2", "category3"],
++  "author": "Author Name"
++}
++\`\`\`
++
++**Critical requirements:**
++
++- **Keywords**: Exactly ${REQUIRED_KEYWORD_COUNT} keywords. These should be relevant search terms for the book.
++- **Categories**: Exactly ${REQUIRED_CATEGORY_COUNT} categories. Choose from standard book categories in your genre.
++- **Blurb**: Compelling, error-free, under 4000 characters. Use allowed HTML tags for formatting.
++- **Subtitle** (optional): A short descriptive subtitle if appropriate.
++- **No placeholders**: Every field must be complete and specific. Do not leave TODO: or similar placeholders.
++
++### Phase 3 — Commit and Push
++
++\`\`\`
++git add release/listing.json
++git commit -m "release: add store listing for ${title}"
++git push
++\`\`\`
++
++## Self-check before completing
++
++Before you push the commit, confirm:
++
++- \`release/listing.json\` exists and is valid JSON.
++- The blurb is compelling and error-free.
++- Keywords count is exactly ${REQUIRED_KEYWORD_COUNT}.
++- Categories count is exactly ${REQUIRED_CATEGORY_COUNT}.
++- No TODO: placeholders remain.
++- The commit and push succeeded.
++
++## Important Guidelines
++
++- Read the complete manuscript to understand the story/content deeply.
++- Create a compelling, market-focused blurb that would appeal to potential readers.
++- Use the allowed HTML tags in the blurb to enhance formatting and readability.
++- Ensure all JSON is valid and properly formatted.
++- Do not create any other files or modify any existing files besides the listing file.`;
++}
+diff --git a/packages/core/src/prompts/packager.ts b/packages/core/src/prompts/packager.ts
+new file mode 100644
+index 0000000..1c69d57
+--- /dev/null
++++ b/packages/core/src/prompts/packager.ts
+@@ -0,0 +1,91 @@
++import { ProjectType } from '../config/schemas.js';
++import { buildSharedPreamble } from './shared.js';
++
++export interface PackagerPromptParams {
++  title: string;
++  repoName: string;
++  chapterCount: number;
++  projectType?: ProjectType | undefined;
++}
++
++export function buildPackagerPrompt(params: PackagerPromptParams): string {
++  const { title, repoName, chapterCount, projectType } = params;
++  const isNonFiction = projectType === ProjectType.NON_FICTION;
++
++  const releaseManifestSchema = isNonFiction
++    ? `\`\`\`json
++{
++  "title": "${title}",
++  "format": "non-fiction",
++  "chapters": ${chapterCount},
++  "completed": true,
++  "buildDate": "ISO-8601 timestamp",
++  "sourceVersion": "git commit SHA from main branch"
++}
++\`\`\``
++    : `\`\`\`json
++{
++  "title": "${title}",
++  "format": "fiction",
++  "chapters": ${chapterCount},
++  "completed": true,
++  "buildDate": "ISO-8601 timestamp",
++  "sourceVersion": "git commit SHA from main branch"
++}
++\`\`\``;
++
++  return `# Packager Agent — System Prompt
++
++You are the Packager agent. Your responsibility is to assemble the final manuscript from all completed chapter files and generate a release manifest.
++
++${buildSharedPreamble()}
++
++## Context
++
++- **Repository**: ${repoName}
++- **Book title**: ${title}
++- **Total chapters**: ${chapterCount}
++- **Type**: ${isNonFiction ? 'non-fiction' : 'fiction'}
++
++## Your Task
++
++### Phase 1 — Assemble Manuscript
++
++Combine all chapter files into a single unified manuscript:
++
++1. Read all chapter files from \`manuscript/chapter-01.md\` through \`manuscript/chapter-${String(chapterCount).padStart(2, '0')}.md\`.
++2. Concatenate them in order into a single \`manuscript/manuscript.md\` file.
++3. Preserve all original formatting, headings, and content from each chapter.
++4. Do **not** add section breaks, chapter headers, or any other separators between chapters — the chapters are already self-contained with their own headings.
++
++### Phase 2 — Create Release Manifest
++
++Create a release manifest file at \`release/manifest.json\`:
++
++${releaseManifestSchema}
++
++Use \`git rev-parse HEAD\` to get the commit SHA from the main branch.
++
++### Phase 3 — Commit and Push
++
++\`\`\`
++git add manuscript/manuscript.md release/manifest.json
++git commit -m "release: assemble final manuscript and manifest"
++git push
++\`\`\`
++
++## Self-check before completing
++
++Before you push the commit, confirm:
++
++- \`manuscript/manuscript.md\` exists and contains all ${chapterCount} chapters concatenated.
++- \`release/manifest.json\` is valid JSON with all required fields.
++- The commit and push succeeded.
++
++## Important Guidelines
++
++- Read every chapter file exactly once and concatenate them in order — do not skip or reorder.
++- Preserve all original content and formatting from the chapters.
++- The release manifest is machine-consumed; ensure valid JSON.
++- Do not create any other files or modify any existing files besides the two specified.`;
++}
+diff --git a/packages/core/src/prompts/reviser.ts b/packages/core/src/prompts/reviser.ts
+index f527acd..9dc5592 100644
+--- a/packages/core/src/prompts/reviser.ts
++++ b/packages/core/src/prompts/reviser.ts
+@@ -1,6 +1,7 @@
+ import type { Style } from '../config/types.js';
+ import { ProjectType } from '../config/schemas.js';
+ import { buildSharedPreamble } from './shared.js';
++import { formatToleranceForPrompt } from '../word-count-policy/index.js';
+ 
+ export interface ReviserPromptParams {
+   reviewComments: string;
+@@ -14,6 +15,7 @@ export interface ReviserPromptParams {
+ export function buildReviserPrompt(params: ReviserPromptParams): string {
+   const { reviewComments, style, wordCountTarget, revisionRound, chapterNumber, projectType } = params;
+ 
++  const tolerance = formatToleranceForPrompt('review');
+   const paddedChapter = String(chapterNumber).padStart(2, '0');
+   const chapterFile = `manuscript/chapter-${paddedChapter}.md`;
+   const isNonFiction = projectType === ProjectType.NON_FICTION;
+@@ -41,7 +43,7 @@ Apply each step. Apply each to every flagged passage, not only the first.
+ 4. **Revise integratively.** When you change a line, re-read the surrounding paragraph and confirm the change still flows. When you change a paragraph, re-read the surrounding section. Patches that fix one line and break the next are net negative.
+ 5. **Maintain the constraints while you revise.**
+    - Hold the specified voice, tense, and POV throughout the revision.
+-   - Stay within ±10% of the word count target (${wordCountTarget.toLocaleString()} words).
++   - Stay within ${tolerance} of the word count target (${wordCountTarget.toLocaleString()} words).
+    - Honor every cited factual detail in the bibles and the continuity state.
+    - Keep subject depictions consistent with the public record. **Never introduce fabricated dialogue, interior, sensory texture, or named participants** while revising — the editor's no-fabrication standard applies to your edits too.
+ 6. **Do not re-architect.** Do not refactor sections or rewrite the chapter wholesale unless a CRITICAL comment specifically requires it. Targeted craft revision; not a redraft.
+@@ -56,7 +58,7 @@ Apply each step. Apply each to every flagged passage, not only the first.
+ 3. **Revise integratively.** When you change a line, re-read the surrounding paragraph and confirm the change still flows. When you change a paragraph, re-read the surrounding scene. Patches that fix one line and break the next are net negative.
+ 4. **Maintain the constraints while you revise.**
+    - Hold the specified voice, tense, and POV throughout the revision.
+-   - Stay within ±10% of the word count target (${wordCountTarget.toLocaleString()} words).
++   - Stay within ${tolerance} of the word count target (${wordCountTarget.toLocaleString()} words).
+    - Honor every continuity detail: the bibles and any continuity state from prior chapters.
+    - Keep character voices consistent with the character bible.
+ 5. **Do not re-architect.** Do not refactor scenes or rewrite the chapter wholesale unless a CRITICAL comment specifically requires it. Targeted craft revision; not a redraft.
+@@ -70,7 +72,7 @@ Before staging, read your revised draft once end to end. Confirm:
+ 
+ - Every CRITICAL and MAJOR comment is addressed.
+ - Tense and POV hold throughout — no new slips introduced by the edits.
+-- Word count is within ±10% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${tolerance} of ${wordCountTarget.toLocaleString()}.
+ - Every direct quote in the revised passages still names its publication source.
+ - Every analytical inference in the revised passages is explicitly hedged.
+ - No new invented texture (dialogue, interior, sensory detail, named participants) was introduced anywhere — including the parts you didn't touch (it is easy to drift).
+@@ -83,7 +85,7 @@ Before staging, read your revised draft once end to end. Confirm:
+ 
+ - Every CRITICAL and MAJOR comment is addressed.
+ - Tense and POV hold throughout — no new slips introduced by the edits.
+-- Word count is within ±10% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${tolerance} of ${wordCountTarget.toLocaleString()}.
+ - The continuity state is still honored — no new contradictions.
+ - The prose around each edit still flows naturally with the edit in place.
+ - No new instances of the AI-prose anti-patterns (filtering verbs, body clichés, empty modifiers) appeared in your revisions.`;
+@@ -105,7 +107,7 @@ ${buildSharedPreamble()}
+ ## Revision Assignment
+ 
+ - **Revision Round**: ${revisionRound}
+-- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ±10%)
++- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ${tolerance})
+ 
+ ## Style Guide
+ 
+diff --git a/packages/core/src/prompts/writer.ts b/packages/core/src/prompts/writer.ts
+index a1a3f47..464e24b 100644
+--- a/packages/core/src/prompts/writer.ts
++++ b/packages/core/src/prompts/writer.ts
+@@ -3,6 +3,7 @@ import type { Style } from '../config/types.js';
+ import { ProjectType } from '../config/schemas.js';
+ import { pruneContinuityState } from '../writing/continuity.js';
+ import { buildSharedPreamble } from './shared.js';
++import { formatToleranceForPrompt } from '../word-count-policy/index.js';
+ 
+ export interface WriterPromptParams {
+   chapterNumber: number;
+@@ -198,6 +199,8 @@ export function buildWriterPrompt(params: WriterPromptParams): string {
+     projectType,
+     seriesBookNumber,
+   } = params;
++
++  const tolerance = formatToleranceForPrompt('writer');
+   const prunedState = pruneContinuityState(continuityState);
+ 
+   const paddedChapter = String(chapterNumber).padStart(2, '0');
+@@ -277,7 +280,7 @@ Apply each step. Do not skip the prep — chapters written cold are visibly chap
+ 1. **Prepare and research.** Before drafting, read the chapter summaries for all prior chapters and read the full text of your predecessor chapters${predecessorChapters.length > 0 ? ' (listed in Story Dependencies above)' : ' (the immediately prior chapter, if any)'}. Consult the subject bible for every subject you will write about. Consult the institutional landscape for every entity the chapter touches. Open \`notes/research-notes.md\` to the per-chapter source notes for this chapter; **use WebSearch / WebFetch to verify the chapter's named facts, quotes, and dates** before you commit them to the prose. Cache new findings (URL + accessed date) into the research notes.
+ 2. **Begin the file** with the heading: \`# Chapter ${chapterNumber}: <title from outline>\` on the first line.
+ 3. **Write full prose.** No bullet points, no outlines, no notes inside the file. Every paragraph is narrative or analytical prose.
+-4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (±5%). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
++4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (${tolerance}). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
+ 5. **Honor the citations the bibles establish.** Quote subjects only verbatim from cited publications. Name organizations as the bible names them. Use dates the bible has sourced.
+ 6. **Hedge analytical inferences explicitly.** When the public record does not establish a claim, render it as inference: "publicly described as", "by their own account", "according to the company's website", "in a press release dated".
+ 7. **Do not invent.** No fabricated dialogue, no fabricated interior, no fabricated sensory detail, no fabricated named participants. The Editor's first criterion is sourcing discipline; an invented detail flagged on round-1 is a guaranteed revision round.
+@@ -291,7 +294,7 @@ Apply each step. Do not skip the prep — chapters written cold are visibly chap
+ 1. **Prepare.** Before drafting, read the chapter summaries for all prior chapters and read the full text of your predecessor chapters${predecessorChapters.length > 0 ? ' (listed in Story Dependencies above)' : ' (the immediately prior chapter, if any)'}. Consult the character bible for every character you will write. Consult the world bible for every location and rule the chapter touches. Consult the continuity state above.
+ 2. **Begin the file** with the heading: \`# Chapter ${chapterNumber}: <title from outline>\` on the first line.
+ 3. **Write full prose.** No bullet points, no outlines, no notes inside the file. Every paragraph is narrative prose.
+-4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (±5%). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
++4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (${tolerance}). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
+ 5. **Maintain continuity.** Honor every character status, location, timeline event, and world-state detail in the continuity state above. Honor the bibles.
+ 6. **Keep voices consistent** with the character bible's voice signatures.
+ 7. **Respect the world-rule costs and limits** from the world bible.
+@@ -305,7 +308,7 @@ Apply each step. Do not skip the prep — chapters written cold are visibly chap
+ Read your draft once before staging. Catch these classes of issue while you can fix them:
+ 
+ - Tense and POV hold throughout — no slips into present tense for "vivid" passages, no narrative-omniscient interior on real subjects.
+-- Word count is within ±5% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${tolerance} of ${wordCountTarget.toLocaleString()}.
+ - Every direct quote names its publication source in the prose.
+ - Every analytical inference is explicitly hedged.
+ - No invented texture: no fabricated dialogue, interior, sensory detail, or named participants in undocumented meetings.
+@@ -319,7 +322,7 @@ Read your draft once before staging. Catch these classes of issue while you can
+ Read your draft once before staging. Catch these classes of issue while you can fix them:
+ 
+ - Tense and POV hold throughout — no slips.
+-- Word count is within ±5% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${tolerance} of ${wordCountTarget.toLocaleString()}.
+ - Every scene has an objective, an obstacle, an escalation, and a turn.
+ - The opening is in motion; the close has weight.
+ - The continuity state is honored — no contradictions.
+@@ -337,7 +340,7 @@ ${buildSharedPreamble()}
+ 
+ - **Chapter Number**: ${chapterNumber}
+ - **Output File**: \`${chapterFile}\`
+-- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (aim for ±5%)
++- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (aim for ${tolerance})
+ 
+ ## Style Guide
+ 
+diff --git a/packages/core/src/queue/__tests__/queue.test.ts b/packages/core/src/queue/__tests__/queue.test.ts
+index 06fc9e1..593e084 100644
+--- a/packages/core/src/queue/__tests__/queue.test.ts
++++ b/packages/core/src/queue/__tests__/queue.test.ts
+@@ -47,6 +47,25 @@ describe('parseWorkItem', () => {
+     expect(result).toEqual(item);
+   });
+ 
++  it('parses a valid PACKAGE_MANUSCRIPT message with runId', () => {
++    const item: WorkItem = {
++      type: 'PACKAGE_MANUSCRIPT',
++      projectId: 'proj-3',
++      runId: 'run-xyz',
++    };
++    const result = parseWorkItem(JSON.stringify(item));
++    expect(result).toEqual(item);
++  });
++
++  it('parses a valid PACKAGE_MANUSCRIPT message without runId', () => {
++    const item: WorkItem = {
++      type: 'PACKAGE_MANUSCRIPT',
++      projectId: 'proj-3',
++    };
++    const result = parseWorkItem(JSON.stringify(item));
++    expect(result).toEqual(item);
++  });
++
+   it('throws for non-JSON input', () => {
+     expect(() => parseWorkItem('not json')).toThrow(
+       'Failed to parse work item: body is not valid JSON',
+@@ -75,7 +94,7 @@ describe('parseWorkItem', () => {
+     expect(message).toContain('nodeId');
+   });
+ 
+-  it('parses all 14 work-item types without error', () => {
++  it('parses all 15 work-item types without error', () => {
+     const items: WorkItem[] = [
+       { type: 'BOOTSTRAP_PROJECT', projectId: 'p', issueNumber: 1, issueBody: 'body' },
+       { type: 'BOOTSTRAP_REPO', projectId: 'p', issueNumber: 1 },
+@@ -98,6 +117,7 @@ describe('parseWorkItem', () => {
+       { type: 'TRIGGER_NEXT_CHAPTER', projectId: 'p' },
+       { type: 'RECONCILE_SWEEP' },
+       { type: 'FINAL_REVIEW', projectId: 'p' },
++      { type: 'PACKAGE_MANUSCRIPT', projectId: 'p' },
+     ];
+ 
+     for (const item of items) {
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index f291e73..8516a13 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -14,6 +14,8 @@ export type {
+   TriggerNextChapterItem,
+   ReconcileSweepItem,
+   FinalReviewItem,
++  PackageManuscriptItem,
++  GenerateListingItem,
+   WorkItem,
+ } from './types.js';
+ 
+@@ -33,6 +35,8 @@ export {
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
++  GenerateListingSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+diff --git a/packages/core/src/queue/schemas.ts b/packages/core/src/queue/schemas.ts
+index 6b43fb3..e0d74e5 100644
+--- a/packages/core/src/queue/schemas.ts
++++ b/packages/core/src/queue/schemas.ts
+@@ -94,6 +94,18 @@ export const FinalReviewSchema = z.object({
+   projectId: z.string().min(1),
+ });
+ 
++export const PackageManuscriptSchema = z.object({
++  type: z.literal('PACKAGE_MANUSCRIPT'),
++  projectId: z.string().min(1),
++  runId: z.string().optional(),
++});
++
++export const GenerateListingSchema = z.object({
++  type: z.literal('GENERATE_LISTING'),
++  projectId: z.string().min(1),
++  runId: z.string().optional(),
++});
++
+ export const WorkItemSchema = z.discriminatedUnion('type', [
+   BootstrapProjectSchema,
+   BootstrapRepoSchema,
+@@ -111,4 +123,6 @@ export const WorkItemSchema = z.discriminatedUnion('type', [
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
++  GenerateListingSchema,
+ ]);
+diff --git a/packages/core/src/queue/types.ts b/packages/core/src/queue/types.ts
+index a0da274..9c41656 100644
+--- a/packages/core/src/queue/types.ts
++++ b/packages/core/src/queue/types.ts
+@@ -16,6 +16,8 @@ import type {
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
++  GenerateListingSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+@@ -35,5 +37,7 @@ export type ContinuityFixItem = z.infer<typeof ContinuityFixSchema>;
+ export type TriggerNextChapterItem = z.infer<typeof TriggerNextChapterSchema>;
+ export type ReconcileSweepItem = z.infer<typeof ReconcileSweepSchema>;
+ export type FinalReviewItem = z.infer<typeof FinalReviewSchema>;
++export type PackageManuscriptItem = z.infer<typeof PackageManuscriptSchema>;
++export type GenerateListingItem = z.infer<typeof GenerateListingSchema>;
+ 
+ export type WorkItem = z.infer<typeof WorkItemSchema>;
+diff --git a/packages/core/src/release-policy/__tests__/manuscript.test.ts b/packages/core/src/release-policy/__tests__/manuscript.test.ts
+new file mode 100644
+index 0000000..c77ff87
+--- /dev/null
++++ b/packages/core/src/release-policy/__tests__/manuscript.test.ts
+@@ -0,0 +1,459 @@
++import { describe, it, expect } from 'vitest';
++import { validateManuscriptStructure } from '../index.js';
++
++describe('validateManuscriptStructure', () => {
++  describe('valid manuscripts', () => {
++    it('accepts a valid single chapter', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Introduction\n\nSome content here.',
++        },
++      ]);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('accepts multiple valid chapters in sequence', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Introduction\n\nContent for chapter 1.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 2: Development\n\nContent for chapter 2.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Conclusion\n\nContent for chapter 3.',
++        },
++      ]);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('handles empty lines before the heading', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '\n\n# Chapter 1: Title\n\nContent here.',
++        },
++      ]);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('accepts headings with complex titles', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: A Complex Title with Many Words\n\nContent.',
++        },
++      ]);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++  });
++
++  describe('H1_MISSING', () => {
++    it('detects when chapter has no level-1 heading', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'Some content without a heading.',
++        },
++      ]);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'H1_MISSING' }));
++    });
++
++    it('detects missing heading even with level-2 heading present', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '## Chapter 1: Introduction\n\nSome content.',
++        },
++      ]);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'H1_MISSING' }));
++    });
++
++    it('skips H1_MALFORMED and H1_NUMBER_MISMATCH when H1_MISSING is present', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'No heading at all',
++        },
++      ]);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes).toContain('H1_MISSING');
++      expect(codes).not.toContain('H1_MALFORMED');
++      expect(codes).not.toContain('H1_NUMBER_MISMATCH');
++    });
++  });
++
++  describe('H1_NOT_FIRST', () => {
++    it('detects when heading is not on first non-empty line', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'Some intro text\n# Chapter 1: Title\n\nMore content.',
++        },
++      ]);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({ code: 'H1_NOT_FIRST' })
++      );
++    });
++
++    it('allows empty lines before the heading', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '\n\n\n# Chapter 1: Title\n\nContent.',
++        },
++      ]);
++      expect(result.errors.some((e) => e.code === 'H1_NOT_FIRST')).toBe(false);
++    });
++
++    it('allows whitespace-only lines before the heading', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '   \n\t\n# Chapter 1: Title\n\nContent.',
++        },
++      ]);
++      expect(result.errors.some((e) => e.code === 'H1_NOT_FIRST')).toBe(false);
++    });
++  });
++
++  describe('H1_MALFORMED', () => {
++    it('detects heading without "Chapter" prefix', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# 1: Introduction\n\nContent.',
++        },
++      ]);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({ code: 'H1_MALFORMED' })
++      );
++    });
++
++    it('detects heading without chapter number', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter: Introduction\n\nContent.',
++        },
++      ]);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({ code: 'H1_MALFORMED' })
++      );
++    });
++
++    it('detects heading without title', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1:\n\nContent.',
++        },
++      ]);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({ code: 'H1_MALFORMED' })
++      );
++    });
++
++    it('detects heading without colon separator', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1 Introduction\n\nContent.',
++        },
++      ]);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({ code: 'H1_MALFORMED' })
++      );
++    });
++
++    it('accepts chapter numbers with leading zeros', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 01: Introduction\n\nContent.',
++        },
++      ]);
++      expect(result.errors.some((e) => e.code === 'H1_MALFORMED')).toBe(false);
++    });
++
++    it('accepts chapter numbers with multiple digits', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-42.md',
++          content: '# Chapter 42: Advanced Topics\n\nContent.',
++        },
++      ]);
++      expect(result.errors.some((e) => e.code === 'H1_MALFORMED')).toBe(false);
++    });
++
++    it('skips H1_MALFORMED and H1_NUMBER_MISMATCH when H1_MISSING is present', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'No heading at all',
++        },
++      ]);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes).toContain('H1_MISSING');
++      expect(codes).not.toContain('H1_MALFORMED');
++      expect(codes).not.toContain('H1_NUMBER_MISMATCH');
++    });
++  });
++
++  describe('H1_NUMBER_MISMATCH', () => {
++    it('detects when heading number does not match path number', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 2: Introduction\n\nContent.',
++        },
++      ]);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({ code: 'H1_NUMBER_MISMATCH' })
++      );
++    });
++
++    it('allows matching chapter numbers', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-05.md',
++          content: '# Chapter 5: Title\n\nContent.',
++        },
++      ]);
++      expect(result.errors.some((e) => e.code === 'H1_NUMBER_MISMATCH')).toBe(false);
++    });
++
++    it('treats leading zeros in path as separate from heading number', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Title\n\nContent.',
++        },
++      ]);
++      expect(result.errors.some((e) => e.code === 'H1_NUMBER_MISMATCH')).toBe(false);
++    });
++  });
++
++  describe('CHAPTER_DUPLICATE', () => {
++    it('detects when two chapters have the same number', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Duplicate\n\nContent.',
++        },
++      ]);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({ code: 'CHAPTER_DUPLICATE' })
++      );
++    });
++
++    it('detects duplicates with same path-extracted number', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'some/other/chapter-01.md',
++          content: '# Chapter 1: Also First\n\nContent.',
++        },
++      ]);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({ code: 'CHAPTER_DUPLICATE' })
++      );
++    });
++
++    it('reports each duplicate number once', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'other/chapter-01.md',
++          content: '# Chapter 1: Duplicate 1\n\nContent.',
++        },
++        {
++          path: 'another/chapter-01.md',
++          content: '# Chapter 1: Duplicate 2\n\nContent.',
++        },
++      ]);
++      const duplicateErrors = result.errors.filter((e) => e.code === 'CHAPTER_DUPLICATE');
++      expect(duplicateErrors).toHaveLength(1);
++    });
++  });
++
++  describe('CHAPTER_GAP', () => {
++    it('detects gap when chapters are not sequential from 1', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Introduction\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Conclusion\n\nContent.',
++        },
++      ]);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({ code: 'CHAPTER_GAP' })
++      );
++    });
++
++    it('detects gap when starting from number other than 1', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 2: Intro\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Conclusion\n\nContent.',
++        },
++      ]);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({ code: 'CHAPTER_GAP' })
++      );
++    });
++
++    it('accepts sequential chapters from 1 to n', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: One\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 2: Two\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Three\n\nContent.',
++        },
++      ]);
++      expect(result.errors.some((e) => e.code === 'CHAPTER_GAP')).toBe(false);
++    });
++
++    it('allows chapters in any order as long as they form 1..n', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Three\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: One\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 2: Two\n\nContent.',
++        },
++      ]);
++      expect(result.errors.some((e) => e.code === 'CHAPTER_GAP')).toBe(false);
++    });
++
++    it('handles empty manuscript', () => {
++      const result = validateManuscriptStructure([]);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++  });
++
++  describe('error sorting', () => {
++    it('sorts errors by code in lexicographic order', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'No heading',
++        },
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++      ]);
++      const codes = result.errors.map((e) => e.code);
++      const sorted = [...codes].sort();
++      expect(codes).toEqual(sorted);
++    });
++
++    it('maintains stable ordering with multiple error types', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 1: Wrong number\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Duplicate\n\nContent.',
++        },
++      ]);
++      const codes = result.errors.map((e) => e.code);
++      const sorted = [...codes].sort();
++      expect(codes).toEqual(sorted);
++    });
++  });
++
++  describe('multiple errors', () => {
++    it('collects per-chapter and set-level errors', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'No heading - missing',
++        },
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Duplicate\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Gap\n\nContent.',
++        },
++      ]);
++      expect(result.valid).toBe(false);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes).toContain('CHAPTER_DUPLICATE');
++      expect(codes).toContain('CHAPTER_GAP');
++      expect(codes).toContain('H1_MISSING');
++    });
++
++    it('handles complex scenario with multiple issues', () => {
++      const result = validateManuscriptStructure([
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'Some text\n# Chapter 2: Wrong number and not first\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 1: Duplicate\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-05.md',
++          content: '# Chapter 5: Gap in sequence\n\nContent.',
++        },
++      ]);
++      expect(result.valid).toBe(false);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes.length).toBeGreaterThanOrEqual(3);
++    });
++  });
++});
+diff --git a/packages/core/src/release-policy/__tests__/validate.test.ts b/packages/core/src/release-policy/__tests__/validate.test.ts
+new file mode 100644
+index 0000000..8bf528d
+--- /dev/null
++++ b/packages/core/src/release-policy/__tests__/validate.test.ts
+@@ -0,0 +1,311 @@
++import { describe, it, expect } from 'vitest';
++import {
++  validateListing,
++  MAX_BLURB_LENGTH,
++  REQUIRED_KEYWORD_COUNT,
++  REQUIRED_CATEGORY_COUNT,
++} from '../index.js';
++
++const validListing = {
++  title: 'Test Title',
++  subtitle: 'Test Subtitle',
++  blurb: 'This is a valid test blurb.',
++  keywords: ['word1', 'word2', 'word3', 'word4', 'word5', 'word6', 'word7'],
++  categories: ['category1', 'category2', 'category3'],
++  author: 'Test Author',
++};
++
++describe('validateListing', () => {
++  describe('valid listing', () => {
++    it('returns valid: true when listing meets all requirements', () => {
++      const result = validateListing(validListing);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('accepts optional subtitle as undefined', () => {
++      const result = validateListing({
++        ...validListing,
++        subtitle: undefined,
++      });
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++  });
++
++  describe('BLURB_TOO_LONG', () => {
++    it('detects when blurb exceeds max length', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: 'a'.repeat(MAX_BLURB_LENGTH + 1),
++      });
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'BLURB_TOO_LONG' }));
++    });
++
++    it('accepts blurb at exactly max length', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: 'a'.repeat(MAX_BLURB_LENGTH),
++      });
++      expect(result.errors.some((e) => e.code === 'BLURB_TOO_LONG')).toBe(false);
++    });
++  });
++
++  describe('BLURB_EMPTY', () => {
++    it('detects when blurb is empty', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: '',
++      });
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'BLURB_EMPTY' }));
++    });
++
++    it('detects when blurb is only whitespace', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: '   \n\t  ',
++      });
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'BLURB_EMPTY' }));
++    });
++  });
++
++  describe('KEYWORD_COUNT', () => {
++    it('detects when keyword count is too low', () => {
++      const result = validateListing({
++        ...validListing,
++        keywords: ['word1', 'word2'],
++      });
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'KEYWORD_COUNT' }));
++    });
++
++    it('detects when keyword count is too high', () => {
++      const result = validateListing({
++        ...validListing,
++        keywords: Array.from({ length: 10 }, (_, i) => `word${i + 1}`),
++      });
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'KEYWORD_COUNT' }));
++    });
++
++    it('accepts exactly 7 keywords', () => {
++      const result = validateListing({
++        ...validListing,
++        keywords: Array.from({ length: REQUIRED_KEYWORD_COUNT }, (_, i) => `word${i + 1}`),
++      });
++      expect(result.errors.some((e) => e.code === 'KEYWORD_COUNT')).toBe(false);
++    });
++  });
++
++  describe('CATEGORY_COUNT', () => {
++    it('detects when category count is too low', () => {
++      const result = validateListing({
++        ...validListing,
++        categories: ['cat1'],
++      });
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'CATEGORY_COUNT' }));
++    });
++
++    it('detects when category count is too high', () => {
++      const result = validateListing({
++        ...validListing,
++        categories: ['cat1', 'cat2', 'cat3', 'cat4', 'cat5'],
++      });
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'CATEGORY_COUNT' }));
++    });
++
++    it('accepts exactly 3 categories', () => {
++      const result = validateListing({
++        ...validListing,
++        categories: Array.from({ length: REQUIRED_CATEGORY_COUNT }, (_, i) => `cat${i + 1}`),
++      });
++      expect(result.errors.some((e) => e.code === 'CATEGORY_COUNT')).toBe(false);
++    });
++  });
++
++  describe('UNRESOLVED_PLACEHOLDER', () => {
++    it('detects TODO: in title', () => {
++      const result = validateListing({
++        ...validListing,
++        title: 'Title with TODO: placeholder',
++      });
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'UNRESOLVED_PLACEHOLDER' }));
++    });
++
++    it('detects TODO: in subtitle', () => {
++      const result = validateListing({
++        ...validListing,
++        subtitle: 'Subtitle with TODO: placeholder',
++      });
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'UNRESOLVED_PLACEHOLDER' }));
++    });
++
++    it('detects TODO: in blurb', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: 'Blurb with TODO: placeholder',
++      });
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'UNRESOLVED_PLACEHOLDER' }));
++    });
++
++    it('detects TODO: in author', () => {
++      const result = validateListing({
++        ...validListing,
++        author: 'TODO: Author Name',
++      });
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'UNRESOLVED_PLACEHOLDER' }));
++    });
++
++    it('detects TODO: in keywords', () => {
++      const result = validateListing({
++        ...validListing,
++        keywords: ['word1', 'TODO: word2', 'word3', 'word4', 'word5', 'word6', 'word7'],
++      });
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'UNRESOLVED_PLACEHOLDER' }));
++    });
++
++    it('detects TODO: in categories', () => {
++      const result = validateListing({
++        ...validListing,
++        categories: ['cat1', 'TODO: cat2', 'cat3'],
++      });
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'UNRESOLVED_PLACEHOLDER' }));
++    });
++
++    it('reports only one UNRESOLVED_PLACEHOLDER error even with multiple TODO: occurrences', () => {
++      const result = validateListing({
++        ...validListing,
++        title: 'TODO: title',
++        blurb: 'TODO: blurb',
++        author: 'TODO: author',
++      });
++      const placeholderErrors = result.errors.filter((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
++      expect(placeholderErrors).toHaveLength(1);
++    });
++  });
++
++  describe('DISALLOWED_HTML', () => {
++    it('detects disallowed HTML tags in blurb', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: 'This is a test with <script>alert("xss")</script>.',
++      });
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'DISALLOWED_HTML' }));
++    });
++
++    it('allows permitted HTML tags', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: '<p>Test <b>bold</b> <i>italic</i> <u>underline</u> <br> more</p>',
++      });
++      expect(result.errors.some((e) => e.code === 'DISALLOWED_HTML')).toBe(false);
++    });
++
++    it('allows list tags', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: '<ul><li>item 1</li><li>item 2</li></ul><ol><li>ordered 1</li></ol>',
++      });
++      expect(result.errors.some((e) => e.code === 'DISALLOWED_HTML')).toBe(false);
++    });
++
++    it('allows heading tags h4, h5, h6', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: '<h4>Heading 4</h4><h5>Heading 5</h5><h6>Heading 6</h6>',
++      });
++      expect(result.errors.some((e) => e.code === 'DISALLOWED_HTML')).toBe(false);
++    });
++
++    it('detects disallowed heading tags h1, h2, h3', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: '<h1>Heading 1</h1>',
++      });
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'DISALLOWED_HTML' }));
++    });
++
++    it('detects disallowed HTML tags case-insensitively', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: '<SCRIPT>alert("xss")</SCRIPT>',
++      });
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'DISALLOWED_HTML' }));
++    });
++
++    it('recognizes closing tags as same as opening tags', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: '<div>content</div>',
++      });
++      expect(result.errors).toContainEqual(expect.objectContaining({ code: 'DISALLOWED_HTML' }));
++    });
++
++    it('reports only one DISALLOWED_HTML error even with multiple disallowed tags', () => {
++      const result = validateListing({
++        ...validListing,
++        blurb: '<script>test</script><div>content</div>',
++      });
++      const htmlErrors = result.errors.filter((e) => e.code === 'DISALLOWED_HTML');
++      expect(htmlErrors).toHaveLength(1);
++    });
++  });
++
++  describe('error sorting', () => {
++    it('sorts errors by code in lexicographic order', () => {
++      const result = validateListing({
++        title: 'Title',
++        subtitle: undefined,
++        blurb: '', // BLURB_EMPTY
++        keywords: ['word1'], // KEYWORD_COUNT
++        categories: [], // CATEGORY_COUNT
++        author: 'Author with TODO: placeholder', // UNRESOLVED_PLACEHOLDER
++      });
++      expect(result.errors.map((e) => e.code)).toEqual([
++        'BLURB_EMPTY',
++        'CATEGORY_COUNT',
++        'KEYWORD_COUNT',
++        'UNRESOLVED_PLACEHOLDER',
++      ]);
++    });
++
++    it('maintains stable ordering for multiple errors', () => {
++      const result = validateListing({
++        title: 'Title',
++        subtitle: undefined,
++        blurb: 'a'.repeat(MAX_BLURB_LENGTH + 1), // BLURB_TOO_LONG, DISALLOWED_HTML (if html)
++        keywords: ['word1'], // KEYWORD_COUNT
++        categories: ['cat1'], // CATEGORY_COUNT
++        author: 'Author',
++      });
++      const codes = result.errors.map((e) => e.code);
++      const sorted = [...codes].sort();
++      expect(codes).toEqual(sorted);
++    });
++  });
++
++  describe('multiple errors', () => {
++    it('collects all errors in a single validation', () => {
++      const result = validateListing({
++        title: 'TODO: title',
++        subtitle: undefined,
++        blurb: '', // BLURB_EMPTY
++        keywords: [], // KEYWORD_COUNT
++        categories: [], // CATEGORY_COUNT
++        author: 'Author',
++      });
++      expect(result.valid).toBe(false);
++      expect(result.errors.length).toBeGreaterThan(1);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes).toContain('BLURB_EMPTY');
++      expect(codes).toContain('KEYWORD_COUNT');
++      expect(codes).toContain('CATEGORY_COUNT');
++      expect(codes).toContain('UNRESOLVED_PLACEHOLDER');
++    });
++  });
++});
+diff --git a/packages/core/src/release-policy/index.ts b/packages/core/src/release-policy/index.ts
+new file mode 100644
+index 0000000..551745b
+--- /dev/null
++++ b/packages/core/src/release-policy/index.ts
+@@ -0,0 +1,15 @@
++export type {
++  KdpListing,
++  ListingError,
++  ListingValidation,
++  ChapterFile,
++  ManuscriptError,
++  ManuscriptValidation,
++} from './types.js';
++export {
++  MAX_BLURB_LENGTH,
++  REQUIRED_KEYWORD_COUNT,
++  REQUIRED_CATEGORY_COUNT,
++  ALLOWED_BLURB_TAGS,
++} from './types.js';
++export { validateListing, validateManuscriptStructure } from './validate.js';
+diff --git a/packages/core/src/release-policy/types.ts b/packages/core/src/release-policy/types.ts
+new file mode 100644
+index 0000000..7d01934
+--- /dev/null
++++ b/packages/core/src/release-policy/types.ts
+@@ -0,0 +1,38 @@
++export interface KdpListing {
++  title: string;
++  subtitle?: string | undefined;
++  blurb: string;
++  keywords: string[];
++  categories: string[];
++  author: string;
++}
++
++export interface ListingError {
++  code: string;
++  detail: string;
++}
++
++export interface ListingValidation {
++  valid: boolean;
++  errors: ListingError[];
++}
++
++export interface ChapterFile {
++  path: string;
++  content: string;
++}
++
++export interface ManuscriptError {
++  code: string;
++  detail: string;
++}
++
++export interface ManuscriptValidation {
++  valid: boolean;
++  errors: ManuscriptError[];
++}
++
++export const MAX_BLURB_LENGTH = 4000;
++export const REQUIRED_KEYWORD_COUNT = 7;
++export const REQUIRED_CATEGORY_COUNT = 3;
++export const ALLOWED_BLURB_TAGS = ['b', 'i', 'u', 'br', 'p', 'ul', 'li', 'ol', 'h4', 'h5', 'h6'];
+diff --git a/packages/core/src/release-policy/validate.ts b/packages/core/src/release-policy/validate.ts
+new file mode 100644
+index 0000000..4b5003c
+--- /dev/null
++++ b/packages/core/src/release-policy/validate.ts
+@@ -0,0 +1,199 @@
++import type {
++  KdpListing,
++  ListingError,
++  ListingValidation,
++  ChapterFile,
++  ManuscriptError,
++  ManuscriptValidation,
++} from './types.js';
++import {
++  MAX_BLURB_LENGTH,
++  REQUIRED_KEYWORD_COUNT,
++  REQUIRED_CATEGORY_COUNT,
++  ALLOWED_BLURB_TAGS,
++} from './types.js';
++import { getChapterFilePath } from '../writing/paths.js';
++
++export function validateListing(listing: KdpListing): ListingValidation {
++  const errors: ListingError[] = [];
++
++  // Check BLURB_TOO_LONG
++  if (listing.blurb.length > MAX_BLURB_LENGTH) {
++    errors.push({
++      code: 'BLURB_TOO_LONG',
++      detail: `Blurb exceeds maximum length of ${MAX_BLURB_LENGTH} characters (current: ${listing.blurb.length})`,
++    });
++  }
++
++  // Check BLURB_EMPTY
++  if (!listing.blurb.trim()) {
++    errors.push({
++      code: 'BLURB_EMPTY',
++      detail: 'Blurb is empty or contains only whitespace',
++    });
++  }
++
++  // Check KEYWORD_COUNT
++  if (listing.keywords.length !== REQUIRED_KEYWORD_COUNT) {
++    errors.push({
++      code: 'KEYWORD_COUNT',
++      detail: `Keywords count must be exactly ${REQUIRED_KEYWORD_COUNT} (current: ${listing.keywords.length})`,
++    });
++  }
++
++  // Check CATEGORY_COUNT
++  if (listing.categories.length !== REQUIRED_CATEGORY_COUNT) {
++    errors.push({
++      code: 'CATEGORY_COUNT',
++      detail: `Categories count must be exactly ${REQUIRED_CATEGORY_COUNT} (current: ${listing.categories.length})`,
++    });
++  }
++
++  // Check UNRESOLVED_PLACEHOLDER - one error total for any TODO: substring
++  const fieldsToCheck = [
++    listing.title,
++    listing.subtitle ?? '',
++    listing.blurb,
++    listing.author,
++    ...listing.keywords,
++    ...listing.categories,
++  ];
++  if (fieldsToCheck.some((field) => field.includes('TODO:'))) {
++    errors.push({
++      code: 'UNRESOLVED_PLACEHOLDER',
++      detail: 'Listing contains unresolved placeholder text (TODO:)',
++    });
++  }
++
++  // Check DISALLOWED_HTML - one error total
++  const disallowedTags = findDisallowedHtmlTags(listing.blurb);
++  if (disallowedTags.length > 0) {
++    errors.push({
++      code: 'DISALLOWED_HTML',
++      detail: `Blurb contains disallowed HTML tags: ${disallowedTags.join(', ')}`,
++    });
++  }
++
++  // Sort errors by code (lexicographic order)
++  errors.sort((a, b) => a.code.localeCompare(b.code));
++
++  return {
++    valid: errors.length === 0,
++    errors,
++  };
++}
++
++function findDisallowedHtmlTags(text: string): string[] {
++  const allowedTagsLower = ALLOWED_BLURB_TAGS.map((tag) => tag.toLowerCase());
++  const tagRegex = /<\/?(\w+)[^>]*>/g;
++  const foundTags = new Set<string>();
++
++  let match;
++  while ((match = tagRegex.exec(text)) !== null) {
++    const tagName = match[1];
++    if (tagName !== undefined) {
++      const tagNameLower = tagName.toLowerCase();
++      if (!allowedTagsLower.includes(tagNameLower)) {
++        foundTags.add(tagNameLower);
++      }
++    }
++  }
++
++  return Array.from(foundTags).sort();
++}
++
++export function validateManuscriptStructure(chapters: ChapterFile[]): ManuscriptValidation {
++  const errors: ManuscriptError[] = [];
++  const chapterNumbers: number[] = [];
++
++  for (const chapter of chapters) {
++    const chapterNumber = extractChapterNumber(chapter.path);
++    chapterNumbers.push(chapterNumber);
++
++    const lines = chapter.content.split('\n').map((line) => line.trimEnd());
++    const firstNonEmptyLineIndex = lines.findIndex((line) => line.length > 0);
++    const firstNonEmptyLine = firstNonEmptyLineIndex >= 0 ? lines[firstNonEmptyLineIndex] : null;
++
++    const h1Heading = lines.find((line) => line.startsWith('# ')) ?? null;
++
++    // Rule 1: H1_MISSING
++    if (!h1Heading) {
++      errors.push({
++        code: 'H1_MISSING',
++        detail: `Chapter at path "${chapter.path}" has no level-1 markdown heading`,
++      });
++      continue;
++    }
++
++    // Rule 2: H1_NOT_FIRST
++    if (firstNonEmptyLine !== h1Heading) {
++      errors.push({
++        code: 'H1_NOT_FIRST',
++        detail: `Chapter at path "${chapter.path}" has level-1 heading that is not the first non-empty line`,
++      });
++    }
++
++    // Rule 3: H1_MALFORMED
++    const h1Match = h1Heading.match(/^# Chapter (\d+): (.+)$/);
++    if (!h1Match) {
++      errors.push({
++        code: 'H1_MALFORMED',
++        detail: `Chapter at path "${chapter.path}" has malformed level-1 heading (expected format: "# Chapter <N>: <Title>")`,
++      });
++      continue;
++    }
++
++    const headingNumber = parseInt(h1Match[1] ?? '0', 10);
++
++    // Rule 4: H1_NUMBER_MISMATCH
++    if (chapterNumber !== headingNumber) {
++      errors.push({
++        code: 'H1_NUMBER_MISMATCH',
++        detail: `Chapter at path "${chapter.path}" has heading number ${headingNumber} but path indicates chapter ${chapterNumber}`,
++      });
++    }
++  }
++
++  // Rule 5: CHAPTER_DUPLICATE
++  const uniqueNumbers = new Set(chapterNumbers);
++  if (uniqueNumbers.size < chapterNumbers.length) {
++    const duplicates = chapterNumbers.filter(
++      (num, index) => chapterNumbers.indexOf(num) !== index
++    );
++    const uniqueDuplicates = Array.from(new Set(duplicates));
++    for (const num of uniqueDuplicates) {
++      errors.push({
++        code: 'CHAPTER_DUPLICATE',
++        detail: `Multiple chapters resolve to chapter number ${num}`,
++      });
++    }
++  }
++
++  // Rule 6: CHAPTER_GAP
++  if (chapterNumbers.length > 0) {
++    const sortedNumbers = [...chapterNumbers].sort((a, b) => a - b);
++    const expectedNumbers = Array.from({ length: sortedNumbers.length }, (_, i) => i + 1);
++    if (JSON.stringify(sortedNumbers) !== JSON.stringify(expectedNumbers)) {
++      errors.push({
++        code: 'CHAPTER_GAP',
++        detail: `Chapter numbers must form a sequence from 1 to ${sortedNumbers.length} with no gaps (found: ${sortedNumbers.join(', ')})`,
++      });
++    }
++  }
++
++  // Sort errors by code
++  errors.sort((a, b) => a.code.localeCompare(b.code));
++
++  return {
++    valid: errors.length === 0,
++    errors,
++  };
++}
++
++function extractChapterNumber(path: string): number {
++  const match = path.match(/chapter-(\d+)/);
++  if (match && match[1] !== undefined) {
++    return parseInt(match[1], 10);
++  }
++  return 0;
++}
+diff --git a/packages/core/src/word-count-policy/__tests__/word-count-policy.test.ts b/packages/core/src/word-count-policy/__tests__/word-count-policy.test.ts
+new file mode 100644
+index 0000000..690372f
+--- /dev/null
++++ b/packages/core/src/word-count-policy/__tests__/word-count-policy.test.ts
+@@ -0,0 +1,194 @@
++import { describe, it, expect } from 'vitest';
++import {
++  resolveChapterTarget,
++  resolveTolerance,
++  resolveWordCountRange,
++  formatToleranceForPrompt,
++  clampToProjectType,
++} from '../index.js';
++import { ProjectType } from '../../config/schemas.js';
++
++describe('word-count-policy', () => {
++  describe('resolveChapterTarget', () => {
++    it('floors the division of targetWordCount by chapterCount', () => {
++      expect(resolveChapterTarget({ targetWordCount: 90000, chapterCount: 3 })).toBe(30000);
++      expect(resolveChapterTarget({ targetWordCount: 100000, chapterCount: 3 })).toBe(33333);
++      expect(resolveChapterTarget({ targetWordCount: 50000, chapterCount: 7 })).toBe(7142);
++    });
++
++    it('throws when chapterCount is 0', () => {
++      expect(() => resolveChapterTarget({ targetWordCount: 90000, chapterCount: 0 })).toThrow(
++        'chapterCount must be positive',
++      );
++    });
++
++    it('throws when chapterCount is negative', () => {
++      expect(() => resolveChapterTarget({ targetWordCount: 90000, chapterCount: -5 })).toThrow(
++        'chapterCount must be positive',
++      );
++    });
++  });
++
++  describe('resolveTolerance', () => {
++    it('returns 0.05 for writer stage', () => {
++      expect(resolveTolerance('writer')).toBe(0.05);
++    });
++
++    it('returns 0.10 for review stage', () => {
++      expect(resolveTolerance('review')).toBe(0.10);
++    });
++
++    it('returns 0.20 for merge stage', () => {
++      expect(resolveTolerance('merge')).toBe(0.20);
++    });
++  });
++
++  describe('resolveWordCountRange', () => {
++    it('returns correct range for writer stage', () => {
++      const range = resolveWordCountRange({
++        targetWordCount: 90000,
++        chapterCount: 3,
++        stage: 'writer',
++      });
++      // target = floor(90000 / 3) = 30000
++      // tolerance = 0.05
++      // min = floor(30000 * 0.95) = 28500
++      // max = ceil(30000 * 1.05) = 31500
++      expect(range.min).toBe(28500);
++      expect(range.max).toBe(31500);
++    });
++
++    it('returns correct range for review stage', () => {
++      const range = resolveWordCountRange({
++        targetWordCount: 90000,
++        chapterCount: 3,
++        stage: 'review',
++      });
++      // target = floor(90000 / 3) = 30000
++      // tolerance = 0.10
++      // min = floor(30000 * 0.90) = 27000
++      // max = ceil(30000 * 1.10) = 33000
++      expect(range.min).toBe(27000);
++      expect(range.max).toBe(33000);
++    });
++
++    it('returns correct range for merge stage', () => {
++      const range = resolveWordCountRange({
++        targetWordCount: 90000,
++        chapterCount: 3,
++        stage: 'merge',
++      });
++      // target = floor(90000 / 3) = 30000
++      // tolerance = 0.20
++      // min = floor(30000 * 0.80) = 24000
++      // max = ceil(30000 * 1.20) = 36000
++      expect(range.min).toBe(24000);
++      expect(range.max).toBe(36000);
++    });
++
++    it('uses ceil for max even when result would be exact', () => {
++      const range = resolveWordCountRange({
++        targetWordCount: 100000,
++        chapterCount: 10,
++        stage: 'writer',
++      });
++      // target = floor(100000 / 10) = 10000
++      // tolerance = 0.05
++      // min = floor(10000 * 0.95) = 9500
++      // max = ceil(10000 * 1.05) = 10500
++      expect(range.min).toBe(9500);
++      expect(range.max).toBe(10500);
++    });
++  });
++
++  describe('formatToleranceForPrompt', () => {
++    it('returns ±5% for writer stage', () => {
++      expect(formatToleranceForPrompt('writer')).toBe('±5%');
++    });
++
++    it('returns ±10% for review stage', () => {
++      expect(formatToleranceForPrompt('review')).toBe('±10%');
++    });
++
++    it('returns ±20% for merge stage', () => {
++      expect(formatToleranceForPrompt('merge')).toBe('±20%');
++    });
++  });
++
++  describe('clampToProjectType', () => {
++    it('returns unclamped range when entirely within bounds', () => {
++      const range = { min: 3000, max: 5000 };
++      const clamped = clampToProjectType({
++        range,
++        projectType: ProjectType.NOVEL,
++      });
++      expect(clamped.min).toBe(3000);
++      expect(clamped.max).toBe(5000);
++    });
++
++    it('clamps both endpoints when range is below project bounds', () => {
++      // NOVEL bounds: chapterMin=3000, chapterMax=5000
++      const range = { min: 1000, max: 2000 };
++      const clamped = clampToProjectType({
++        range,
++        projectType: ProjectType.NOVEL,
++      });
++      // min = min(max(1000, 3000), 5000) = 3000
++      // max = min(max(2000, 3000), 5000) = 3000
++      expect(clamped.min).toBe(3000);
++      expect(clamped.max).toBe(3000);
++    });
++
++    it('clamps both endpoints when range is above project bounds', () => {
++      const range = { min: 6000, max: 7000 };
++      const clamped = clampToProjectType({
++        range,
++        projectType: ProjectType.NOVEL,
++      });
++      // min = min(max(6000, 3000), 5000) = 5000
++      // max = min(max(7000, 3000), 5000) = 5000
++      expect(clamped.min).toBe(5000);
++      expect(clamped.max).toBe(5000);
++    });
++
++    it('clamps min when below bounds but max within bounds', () => {
++      const range = { min: 2000, max: 4000 };
++      const clamped = clampToProjectType({
++        range,
++        projectType: ProjectType.NOVEL,
++      });
++      expect(clamped.min).toBe(3000);
++      expect(clamped.max).toBe(4000);
++    });
++
++    it('clamps max when above bounds but min within bounds', () => {
++      const range = { min: 4000, max: 6000 };
++      const clamped = clampToProjectType({
++        range,
++        projectType: ProjectType.NOVEL,
++      });
++      expect(clamped.min).toBe(4000);
++      expect(clamped.max).toBe(5000);
++    });
++
++    it('works with different project types', () => {
++      // NOVELLA bounds: chapterMin=2500, chapterMax=4000
++      const range = { min: 1000, max: 5000 };
++      const clamped = clampToProjectType({
++        range,
++        projectType: ProjectType.NOVELLA,
++      });
++      expect(clamped.min).toBe(2500);
++      expect(clamped.max).toBe(4000);
++    });
++
++    it('throws for unknown project type', () => {
++      expect(() =>
++        clampToProjectType({
++          range: { min: 3000, max: 5000 },
++          projectType: 'unknown' as any,
++        }),
++      ).toThrow('Unknown project type');
++    });
++  });
++});
+diff --git a/packages/core/src/word-count-policy/index.ts b/packages/core/src/word-count-policy/index.ts
+new file mode 100644
+index 0000000..19d738d
+--- /dev/null
++++ b/packages/core/src/word-count-policy/index.ts
+@@ -0,0 +1,8 @@
++export type { WordCountStage, WordCountRange, ClampToProjectTypeParams } from './types.js';
++export {
++  resolveChapterTarget,
++  resolveTolerance,
++  resolveWordCountRange,
++  formatToleranceForPrompt,
++  clampToProjectType,
++} from './policy.js';
+diff --git a/packages/core/src/word-count-policy/policy.ts b/packages/core/src/word-count-policy/policy.ts
+new file mode 100644
+index 0000000..3c04f95
+--- /dev/null
++++ b/packages/core/src/word-count-policy/policy.ts
+@@ -0,0 +1,68 @@
++import { WORD_COUNT_DEFAULTS } from '../config/defaults.js';
++import type { ProjectType } from '../config/schemas.js';
++import type { WordCountRange, WordCountStage } from './types.js';
++
++export function resolveChapterTarget(params: {
++  targetWordCount: number;
++  chapterCount: number;
++}): number {
++  const { targetWordCount, chapterCount } = params;
++  if (chapterCount <= 0) {
++    throw new Error(`chapterCount must be positive, got ${chapterCount}`);
++  }
++  return Math.floor(targetWordCount / chapterCount);
++}
++
++export function resolveTolerance(stage: WordCountStage): number {
++  switch (stage) {
++    case 'writer':
++      return 0.05;
++    case 'review':
++      return 0.10;
++    case 'merge':
++      return 0.20;
++    default:
++      const _exhaustive: never = stage;
++      return _exhaustive;
++  }
++}
++
++export function resolveWordCountRange(params: {
++  targetWordCount: number;
++  chapterCount: number;
++  stage: WordCountStage;
++}): WordCountRange {
++  const { targetWordCount, chapterCount, stage } = params;
++  const target = resolveChapterTarget({ targetWordCount, chapterCount });
++  const tolerance = resolveTolerance(stage);
++
++  return {
++    min: Math.floor(target * (1 - tolerance)),
++    max: Math.ceil(target * (1 + tolerance)),
++  };
++}
++
++export function formatToleranceForPrompt(stage: WordCountStage): string {
++  const tolerance = resolveTolerance(stage);
++  const percentage = Math.round(tolerance * 100);
++  return `±${percentage}%`;
++}
++
++export function clampToProjectType(params: {
++  range: WordCountRange;
++  projectType: ProjectType;
++}): WordCountRange {
++  const { range, projectType } = params;
++  const defaults = WORD_COUNT_DEFAULTS[projectType];
++
++  if (!defaults) {
++    throw new Error(`Unknown project type: ${projectType}`);
++  }
++
++  const { chapterMin, chapterMax } = defaults;
++
++  return {
++    min: Math.min(Math.max(range.min, chapterMin), chapterMax),
++    max: Math.min(Math.max(range.max, chapterMin), chapterMax),
++  };
++}
+diff --git a/packages/core/src/word-count-policy/types.ts b/packages/core/src/word-count-policy/types.ts
+new file mode 100644
+index 0000000..b24900f
+--- /dev/null
++++ b/packages/core/src/word-count-policy/types.ts
+@@ -0,0 +1,11 @@
++export type WordCountStage = 'writer' | 'review' | 'merge';
++
++export interface WordCountRange {
++  min: number;
++  max: number;
++}
++
++export interface ClampToProjectTypeParams {
++  range: WordCountRange;
++  projectType: string;
++}
+diff --git a/packages/lambdas/src/__tests__/integration/concurrency.test.ts b/packages/lambdas/src/__tests__/integration/concurrency.test.ts
+index 6e92874..ada05aa 100644
+--- a/packages/lambdas/src/__tests__/integration/concurrency.test.ts
++++ b/packages/lambdas/src/__tests__/integration/concurrency.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/continuity.test.ts b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+index aab8b67..749c529 100644
+--- a/packages/lambdas/src/__tests__/integration/continuity.test.ts
++++ b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+@@ -36,8 +36,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/escalation.test.ts b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+index 786d7d5..a9b0949 100644
+--- a/packages/lambdas/src/__tests__/integration/escalation.test.ts
++++ b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+@@ -34,8 +34,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+@@ -107,7 +107,7 @@ describe('Escalation (maxRevisionRounds exceeded)', () => {
+     });
+ 
+     // Should NOT have launched an ECS task
+-    const { launchECSTask } = await import('../../shared/index.js');
++    const { launchECSTask } = await import('../../shared/ecs-launcher.js');
+     expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
+ 
+     // Should NOT enqueue anything further
+@@ -154,7 +154,7 @@ describe('Escalation (maxRevisionRounds exceeded)', () => {
+     });
+ 
+     // Should have launched a reviser ECS task
+-    const { launchECSTask } = await import('../../shared/index.js');
++    const { launchECSTask } = await import('../../shared/ecs-launcher.js');
+     expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
+ 
+     // Should NOT have added an escalation comment
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+index 1283926..fb95db4 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+@@ -18,6 +18,8 @@ import { handler as continuityCheckHandler } from '../../../handlers/continuity-
+ import { handler as continuityAuditHandler } from '../../../handlers/continuity-audit.js';
+ import { handler as continuityFixerHandler } from '../../../handlers/continuity-fixer.js';
+ import { handler as finalReviewHandler } from '../../../handlers/final-review.js';
++import { handler as packageManuscriptHandler } from '../../../handlers/package-manuscript.js';
++import { handler as generateListingHandler } from '../../../handlers/generate-listing.js';
+ import { handler as reconcileEnqueuerHandler } from '../../../handlers/reconcile-enqueuer.js';
+ 
+ type SQSHandlerFn = (event: SQSEvent, context: never, callback: () => void) => void | Promise<unknown>;
+@@ -38,6 +40,8 @@ const HANDLER_MAP: Record<string, SQSHandlerFn> = {
+   CONTINUITY_AUDIT: continuityAuditHandler,
+   CONTINUITY_FIX: continuityFixerHandler,
+   FINAL_REVIEW: finalReviewHandler,
++  PACKAGE_MANUSCRIPT: packageManuscriptHandler,
++  GENERATE_LISTING: generateListingHandler,
+ };
+ 
+ let _msgCounter = 0;
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/test-data.ts b/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
+index 18dcd2c..ec0f832 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
+@@ -9,8 +9,8 @@ export const REPO_URL = 'https://github.com/test-org/the-test-novel';
+  * reconcile writer: min = floor(300 * 0.9) = 270, max = ceil(300 * 1.1) = 330
+  * merge-chapter:    min = floor(300 * 0.8) = 240, max = floor(300 * 1.2) = 360
+  */
+-export const TARGET_WORD_COUNT = 300;
+-export const CHAPTER_COUNT = 1;
++export const TARGET_WORD_COUNT = 12000;
++export const CHAPTER_COUNT = 3;
+ 
+ export const TEST_PROJECT_CONFIG = {
+   projectId: PROJECT_ID,
+@@ -30,8 +30,8 @@ export const TEST_PROJECT_CONFIG = {
+   concurrencyLimit: 2,
+ };
+ 
+-/** 300-word chapter content that passes both reconcile (10%) and merge-chapter (20%) tolerances. */
+-export const MOCK_CHAPTER_CONTENT = Array(300).fill('word').join(' ');
++/** 4000-word chapter content that passes both reconcile (5%) and merge-chapter (20%) tolerances. */
++export const MOCK_CHAPTER_CONTENT = Array(4000).fill('word').join(' ');
+ 
+ /** Under-word-count content: 100 words — fails reconcile's 270-word minimum. */
+ export const MOCK_SHORT_CHAPTER_CONTENT = Array(100).fill('word').join(' ');
+@@ -123,6 +123,10 @@ export const BASE_ENV: Record<string, string> = {
+     'arn:aws:ecs:us-east-1:123456789:task-definition/auditor:1',
+   FIXER_TASK_DEF_ARN:
+     'arn:aws:ecs:us-east-1:123456789:task-definition/fixer:1',
++  PACKAGER_TASK_DEF_ARN:
++    'arn:aws:ecs:us-east-1:123456789:task-definition/packager:1',
++  MARKETER_TASK_DEF_ARN:
++    'arn:aws:ecs:us-east-1:123456789:task-definition/marketer:1',
+ };
+ 
+ /** Fake ECS task ARN returned by the mocked launchECSTask. */
+diff --git a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+index 94efdd5..4292323 100644
+--- a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
++++ b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+@@ -40,8 +40,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+ // Mock ECS launcher — launchECSTask returns a fake ARN; getECSTaskStatus
+ // returns STOPPED/0 to simulate immediate successful task completion
+ // ---------------------------------------------------------------------------
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+@@ -86,6 +86,16 @@ beforeEach(() => {
+   fileContents.set('notes/task-graph.json', SINGLE_CHAPTER_TASK_GRAPH_JSON);
+   fileContents.set('manuscript/chapter-01.md', MOCK_CHAPTER_CONTENT);
+   fileContents.set('notes/continuity-state.json', MOCK_CONTINUITY_STATE);
++
++  // Seed valid listing for marketer validation (requires 7 keywords, 3 categories)
++  const validListing = {
++    title: 'The Test Novel',
++    blurb: 'A gripping fantasy tale of heroism and adventure across distant worlds.',
++    keywords: ['fantasy', 'adventure', 'heroes', 'magic', 'epic', 'quest', 'dark'],
++    categories: ['Fantasy', 'Adventure', 'Epic'],
++    author: 'Jordan Vale',
++  };
++  fileContents.set('release/listing.json', JSON.stringify(validListing));
+ });
+ 
+ // ---------------------------------------------------------------------------
+@@ -130,7 +140,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+     expect(project!.repoUrl).toBe('https://github.com/test-org/the-test-novel');
+   });
+ 
+-  it('runs the full pipeline end-to-end through CONTINUITY_AUDIT to FINAL_REVIEW', async () => {
++  it('runs the full pipeline end-to-end through release stages to RELEASED', async () => {
+     // Kick off from BOOTSTRAP_PROJECT
+     pendingQueue.push({
+       type: 'BOOTSTRAP_PROJECT',
+@@ -144,16 +154,18 @@ describe('Full pipeline flow (1-chapter project)', () => {
+     // Verify final pipeline output
+     expect(pendingQueue).toHaveLength(0);
+ 
+-    // Check that both CONTINUITY_AUDIT and FINAL_REVIEW were processed
++    // Check that release stages were processed
+     const { enqueue } = await import('@auto-graph/core');
+     const allEnqueued = vi.mocked(enqueue).mock.calls.map(([, item]) => item);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'CONTINUITY_AUDIT')).toBe(true);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'FINAL_REVIEW')).toBe(true);
++    expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'PACKAGE_MANUSCRIPT')).toBe(true);
++    expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'GENERATE_LISTING')).toBe(true);
+ 
+-    // Verify DynamoDB state: project created
++    // Verify DynamoDB state: project reaches RELEASED status
+     const project = store.projects.get(PROJECT_ID);
+     expect(project).toBeDefined();
+-    expect(project!.status).toBe('COMPLETE');
++    expect(project!.status).toBe('RELEASED');
+ 
+     // Task graph should have chapter 1 with MERGED status
+     const latestVersion = store.taskGraphLatestVersion.get(PROJECT_ID);
+@@ -165,7 +177,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+ 
+     const node = taskGraph!.nodes[0]!;
+     expect(node.status).toBe('MERGED');
+-    expect(node.wordCount).toBe(300);
++    expect(node.wordCount).toBe(4000);
+   });
+ 
+   it('records the correct pipeline step sequence', async () => {
+@@ -202,6 +214,10 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       'CONTINUITY_FIX',
+       'RECONCILE', // fixer
+       'FINAL_REVIEW',
++      'PACKAGE_MANUSCRIPT',
++      'RECONCILE', // packager
++      'GENERATE_LISTING',
++      'RECONCILE', // marketer
+     ];
+ 
+     expect(types).toEqual(expectedSequence);
+diff --git a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+index dcd9217..857d85c 100644
+--- a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
++++ b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts b/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
+index 3c116c2..46273e5 100644
+--- a/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
++++ b/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+index f6c9882..a5c93c2 100644
+--- a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
++++ b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
+index 83a9d70..dd50743 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
+@@ -15,8 +15,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/auditor-abc'),
+@@ -32,7 +32,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../continuity-audit.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+index 345fb1c..1920b19 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+@@ -16,8 +16,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/continuity-abc'),
+@@ -34,7 +34,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../continuity-check.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
+index d44cd30..6d21988 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
+@@ -15,8 +15,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/fixer-abc'),
+@@ -32,7 +32,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../continuity-fixer.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/final-review.test.ts b/packages/lambdas/src/handlers/__tests__/final-review.test.ts
+index 390555f..acaa22c 100644
+--- a/packages/lambdas/src/handlers/__tests__/final-review.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/final-review.test.ts
+@@ -9,6 +9,7 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+     ProjectService: vi.fn(),
+     TaskGraphService: vi.fn(),
+     createGitHubClient: vi.fn(),
++    enqueue: vi.fn().mockResolvedValue(undefined),
+   };
+ });
+ 
+@@ -16,6 +17,7 @@ import {
+   ProjectService,
+   TaskGraphService,
+   createGitHubClient,
++  enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+ import { handler } from '../final-review.js';
+@@ -72,7 +74,8 @@ const allMergedGraph = {
+ 
+ let mockProjectServiceMethods: {
+   get: ReturnType<typeof vi.fn>;
+-  setComplete: ReturnType<typeof vi.fn>;
++  updateWordCount: ReturnType<typeof vi.fn>;
++  updateStatus: ReturnType<typeof vi.fn>;
+ };
+ let mockTaskGraphServiceMethods: {
+   getLatest: ReturnType<typeof vi.fn>;
+@@ -114,7 +117,8 @@ beforeEach(() => {
+ 
+   mockProjectServiceMethods = {
+     get: vi.fn().mockResolvedValue(validProject),
+-    setComplete: vi.fn().mockResolvedValue(undefined),
++    updateWordCount: vi.fn().mockResolvedValue(undefined),
++    updateStatus: vi.fn().mockResolvedValue(undefined),
+   };
+   vi.mocked(ProjectService).mockImplementation(() => mockProjectServiceMethods as never);
+ 
+@@ -131,13 +135,16 @@ beforeEach(() => {
+ });
+ 
+ describe('final-review handler', () => {
+-  it('marks project COMPLETE with word counts from task graph nodes', async () => {
++  it('sets project status to PACKAGING with word counts from task graph nodes', async () => {
+     await handler(makeEvent('proj-123'), {} as never, () => {});
+ 
+-    expect(mockProjectServiceMethods.setComplete).toHaveBeenCalledWith(
++    expect(mockProjectServiceMethods.updateWordCount).toHaveBeenCalledWith(
+       'proj-123',
+       90000, // 30000 + 28000 + 32000
+-      3,
++    );
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith(
++      'proj-123',
++      'PACKAGING',
+     );
+   });
+ 
+@@ -160,10 +167,9 @@ describe('final-review handler', () => {
+     await handler(makeEvent('proj-123'), {} as never, () => {});
+ 
+     expect(mockGitHubClientMethods.getFileContent).toHaveBeenCalledTimes(3);
+-    expect(mockProjectServiceMethods.setComplete).toHaveBeenCalledWith(
++    expect(mockProjectServiceMethods.updateWordCount).toHaveBeenCalledWith(
+       'proj-123',
+       450, // 100 + 200 + 150
+-      3,
+     );
+   });
+ 
+@@ -179,6 +185,15 @@ describe('final-review handler', () => {
+     expect(message).toContain('enable');
+   });
+ 
++  it('enqueues PACKAGE_MANUSCRIPT to start the release phase', async () => {
++    await handler(makeEvent('proj-123'), {} as never, () => {});
++
++    expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
++    const [queueUrl, workItem] = vi.mocked(enqueue).mock.calls[0]!;
++    expect(queueUrl).toBe('https://sqs.us-east-1.amazonaws.com/123/test.fifo');
++    expect(workItem).toEqual({ type: 'PACKAGE_MANUSCRIPT', projectId: 'proj-123' });
++  });
++
+   it('throws when project is not found', async () => {
+     mockProjectServiceMethods.get.mockResolvedValueOnce(undefined);
+ 
+diff --git a/packages/lambdas/src/handlers/__tests__/generate-listing.test.ts b/packages/lambdas/src/handlers/__tests__/generate-listing.test.ts
+new file mode 100644
+index 0000000..0462d39
+--- /dev/null
++++ b/packages/lambdas/src/handlers/__tests__/generate-listing.test.ts
+@@ -0,0 +1,368 @@
++import { describe, it, expect, vi, beforeEach } from 'vitest';
++import type { SQSEvent, SQSRecord } from 'aws-lambda';
++
++vi.mock('@auto-graph/core', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('@auto-graph/core')>();
++  return {
++    ...actual,
++    createDynamoClient: vi.fn().mockReturnValue({}),
++    ProjectService: vi.fn(),
++    AgentRunService: vi.fn(),
++    TaskOutputService: vi.fn(),
++    buildMarketerPrompt: vi.fn().mockReturnValue('mock marketer prompt'),
++    enqueue: vi.fn().mockResolvedValue(undefined),
++  };
++});
++
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
++  return {
++    ...actual,
++    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/xyz789'),
++  };
++});
++
++import {
++  ProjectService,
++  AgentRunService,
++  TaskOutputService,
++  buildMarketerPrompt,
++  enqueue,
++  ProjectType,
++} from '@auto-graph/core';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
++import { handler } from '../generate-listing.js';
++
++const baseEnv = {
++  AWS_REGION: 'us-east-1',
++  DYNAMODB_TABLE_PREFIX: 'test',
++  SQS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123/test.fifo',
++  ECS_CLUSTER_ARN: 'arn:aws:ecs:us-east-1:123:cluster/test',
++  ECS_SUBNETS: 'subnet-abc',
++  ECS_SECURITY_GROUPS: 'sg-abc',
++  GITHUB_TOKEN: 'ghp_test',
++  GITHUB_ORG: 'test-org',
++  ORCHESTRATION_REPO: 'orchestration-repo',
++  MARKETER_TASK_DEF_ARN: 'arn:aws:ecs:us-east-1:123:task-definition/marketer:1',
++  LOG_LEVEL: 'info',
++};
++
++const validProject = {
++  projectId: 'proj-123',
++  status: 'RELEASING' as const,
++  repoName: 'the-dark-tower',
++  repoUrl: 'https://github.com/test-org/the-dark-tower',
++  createdAt: '2024-01-01T00:00:00.000Z',
++  updatedAt: '2024-01-01T00:00:00.000Z',
++  config: {
++    projectId: 'proj-123',
++    projectType: ProjectType.NOVEL,
++    title: 'The Dark Tower',
++    premise: 'A gunslinger pursues the Man in Black across a desert.',
++    genre: 'Dark Fantasy',
++    targetWordCount: 90000,
++    chapterCount: 25,
++    style: { voice: 'sparse and mythic', tense: 'past' as const, pov: 'third-limited' as const },
++    maxRevisionRounds: 5,
++    concurrencyLimit: 3,
++  },
++};
++
++function makeRecord(body: unknown, messageId = 'msg-1'): SQSRecord {
++  return {
++    messageId,
++    receiptHandle: 'handle',
++    body: JSON.stringify(body),
++    attributes: {
++      ApproximateReceiveCount: '1',
++      SentTimestamp: '1000',
++      SenderId: 'sender',
++      ApproximateFirstReceiveTimestamp: '1000',
++    },
++    messageAttributes: {},
++    md5OfBody: 'abc',
++    eventSource: 'aws:sqs',
++    eventSourceARN: 'arn:aws:sqs:us-east-1:123:queue',
++    awsRegion: 'us-east-1',
++  };
++}
++
++function makeEvent(records: SQSRecord[]): SQSEvent {
++  return { Records: records };
++}
++
++let mockProjectServiceMethods: {
++  get: ReturnType<typeof vi.fn>;
++  updateStatus: ReturnType<typeof vi.fn>;
++};
++let mockAgentRunServiceMethods: {
++  create: ReturnType<typeof vi.fn>;
++};
++let mockTaskOutputServiceMethods: {
++  save: ReturnType<typeof vi.fn>;
++};
++
++beforeEach(() => {
++  vi.clearAllMocks();
++
++  for (const [key, value] of Object.entries(baseEnv)) {
++    process.env[key] = value;
++  }
++
++  mockProjectServiceMethods = {
++    get: vi.fn().mockResolvedValue(validProject),
++    updateStatus: vi.fn().mockResolvedValue(undefined),
++  };
++  vi.mocked(ProjectService).mockImplementation(() => mockProjectServiceMethods as never);
++
++  mockAgentRunServiceMethods = {
++    create: vi.fn().mockResolvedValue(undefined),
++  };
++  vi.mocked(AgentRunService).mockImplementation(() => mockAgentRunServiceMethods as never);
++
++  mockTaskOutputServiceMethods = {
++    save: vi.fn().mockResolvedValue(undefined),
++  };
++  vi.mocked(TaskOutputService).mockImplementation(() => mockTaskOutputServiceMethods as never);
++
++  vi.mocked(buildMarketerPrompt).mockReturnValue('mock marketer prompt');
++  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/xyz789');
++  vi.mocked(enqueue).mockResolvedValue(undefined);
++});
++
++describe('GENERATE_LISTING — happy path', () => {
++  it('loads the project record from DynamoDB', async () => {
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockProjectServiceMethods.get).toHaveBeenCalledOnce();
++    expect(mockProjectServiceMethods.get).toHaveBeenCalledWith('proj-123');
++  });
++
++  it('builds the marketer prompt from the project config', async () => {
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(vi.mocked(buildMarketerPrompt)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(buildMarketerPrompt).mock.calls[0]!;
++    expect(params.title).toBe('The Dark Tower');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.genre).toBe('Dark Fantasy');
++    expect(params.projectType).toBe('NOVEL');
++  });
++
++  it('launches an ECS Fargate task with correct parameters', async () => {
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.taskDefinition).toBe(baseEnv.MARKETER_TASK_DEF_ARN);
++    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
++  });
++
++  it('passes correct environment variables to the ECS task', async () => {
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.environment['PROJECT_ID']).toBe('proj-123');
++    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
++    expect(typeof params.environment['RUN_ID']).toBe('string');
++    expect(params.environment['AWS_REGION']).toBe('us-east-1');
++    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++  });
++
++  it('creates an agent run record with status RUNNING and workerType marketer', async () => {
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
++    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
++    expect(runItem.projectId).toBe('proj-123');
++    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/xyz789');
++    expect(runItem.workerType).toBe('marketer');
++    expect(runItem.status).toBe('RUNNING');
++    expect(typeof runItem.runId).toBe('string');
++    expect(runItem.runId.length).toBeGreaterThan(0);
++  });
++
++  it('saves the system prompt to the task-outputs table', async () => {
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
++    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
++    expect(outputItem.projectId).toBe('proj-123');
++    expect(outputItem.outputType).toBe('system-prompt');
++    expect(outputItem.content).toBe('mock marketer prompt');
++    expect(outputItem.contentLength).toBe('mock marketer prompt'.length);
++  });
++
++  it('uses the same runId for agent run and task output records', async () => {
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
++    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
++    expect(runItem.runId).toBe(outputItem.runId);
++  });
++
++  it('updates the project status to RELEASING', async () => {
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledOnce();
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'RELEASING');
++  });
++
++  it('enqueues a RECONCILE work item with the runId', async () => {
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
++    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
++    expect(enqueuedItem.type).toBe('RECONCILE');
++    if (enqueuedItem.type === 'RECONCILE') {
++      expect(enqueuedItem.projectId).toBe('proj-123');
++      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
++      expect(enqueuedItem.runId).toBe(runItem.runId);
++    }
++  });
++
++  it('does not return batch failures on success', async () => {
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toBeUndefined();
++  });
++});
++
++describe('error handling', () => {
++  it('throws when MARKETER_TASK_DEF_ARN is not set', async () => {
++    delete process.env['MARKETER_TASK_DEF_ARN'];
++
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-no-arn')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
++    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when project is not found', async () => {
++    mockProjectServiceMethods.get.mockResolvedValueOnce(undefined);
++
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-missing' };
++    const event = makeEvent([makeRecord(workItem, 'msg-missing')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
++    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when DynamoDB get throws', async () => {
++    mockProjectServiceMethods.get.mockRejectedValueOnce(new Error('DynamoDB error'));
++
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-ddb-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ddb-fail' }] });
++  });
++
++  it('returns batch failure when ECS task launch fails', async () => {
++    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
++    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when agent run creation fails', async () => {
++    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
++
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when task output save fails', async () => {
++    mockTaskOutputServiceMethods.save.mockRejectedValueOnce(new Error('DynamoDB write error'));
++
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-output-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-output-fail' }] });
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when updateStatus fails', async () => {
++    mockProjectServiceMethods.updateStatus.mockRejectedValueOnce(new Error('DynamoDB error'));
++
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-status-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-status-fail' }] });
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when enqueue fails', async () => {
++    vi.mocked(enqueue).mockRejectedValueOnce(new Error('SQS error'));
++
++    const workItem = { type: 'GENERATE_LISTING' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-enqueue-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-enqueue-fail' }] });
++  });
++
++  it('reports non-GENERATE_LISTING work items as batch failures', async () => {
++    const workItem = { type: 'BOOTSTRAP_REPO' as const, projectId: 'proj-123', issueNumber: 1 };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
++    expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
++    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++});
+diff --git a/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts b/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
+index 00bce21..561f74d 100644
+--- a/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
+@@ -14,8 +14,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123'),
+@@ -30,7 +30,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../generate-outline.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
+index f9c9e20..6871f16 100644
+--- a/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
+@@ -37,13 +37,13 @@ const baseEnv = {
+   LOG_LEVEL: 'info',
+ };
+ 
+-// 30 000-word target with 20 % tolerance => min 24 000, max 36 000
++// 4000-word target with 20% tolerance => min 3200, max 4800 (clamped to NOVEL 3000-5000)
+ // We'll use a content with a known word count.
+ function makeContent(wordCount: number): string {
+   return Array(wordCount).fill('word').join(' ');
+ }
+ 
+-const CHAPTER_WORD_COUNT = 30000; // exactly on target
++const CHAPTER_WORD_COUNT = 4000; // exactly on target
+ const chapterContent = makeContent(CHAPTER_WORD_COUNT);
+ 
+ const validProject = {
+@@ -59,7 +59,7 @@ const validProject = {
+     title: 'The Dark Tower',
+     premise: 'A gunslinger pursues the Man in Black across a desert.',
+     genre: 'Dark Fantasy',
+-    targetWordCount: 90000,
++    targetWordCount: 12000,
+     chapterCount: 3,
+     style: { voice: 'sparse and mythic', tense: 'past' as const, pov: 'third-limited' as const },
+     maxRevisionRounds: 5,
+diff --git a/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts b/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts
+new file mode 100644
+index 0000000..92e2cac
+--- /dev/null
++++ b/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts
+@@ -0,0 +1,368 @@
++import { describe, it, expect, vi, beforeEach } from 'vitest';
++import type { SQSEvent, SQSRecord } from 'aws-lambda';
++
++vi.mock('@auto-graph/core', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('@auto-graph/core')>();
++  return {
++    ...actual,
++    createDynamoClient: vi.fn().mockReturnValue({}),
++    ProjectService: vi.fn(),
++    AgentRunService: vi.fn(),
++    TaskOutputService: vi.fn(),
++    buildPackagerPrompt: vi.fn().mockReturnValue('mock packager prompt'),
++    enqueue: vi.fn().mockResolvedValue(undefined),
++  };
++});
++
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
++  return {
++    ...actual,
++    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/xyz789'),
++  };
++});
++
++import {
++  ProjectService,
++  AgentRunService,
++  TaskOutputService,
++  buildPackagerPrompt,
++  enqueue,
++  ProjectType,
++} from '@auto-graph/core';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
++import { handler } from '../package-manuscript.js';
++
++const baseEnv = {
++  AWS_REGION: 'us-east-1',
++  DYNAMODB_TABLE_PREFIX: 'test',
++  SQS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123/test.fifo',
++  ECS_CLUSTER_ARN: 'arn:aws:ecs:us-east-1:123:cluster/test',
++  ECS_SUBNETS: 'subnet-abc',
++  ECS_SECURITY_GROUPS: 'sg-abc',
++  GITHUB_TOKEN: 'ghp_test',
++  GITHUB_ORG: 'test-org',
++  ORCHESTRATION_REPO: 'orchestration-repo',
++  PACKAGER_TASK_DEF_ARN: 'arn:aws:ecs:us-east-1:123:task-definition/packager:1',
++  LOG_LEVEL: 'info',
++};
++
++const validProject = {
++  projectId: 'proj-123',
++  status: 'PACKAGING' as const,
++  repoName: 'the-dark-tower',
++  repoUrl: 'https://github.com/test-org/the-dark-tower',
++  createdAt: '2024-01-01T00:00:00.000Z',
++  updatedAt: '2024-01-01T00:00:00.000Z',
++  config: {
++    projectId: 'proj-123',
++    projectType: ProjectType.NOVEL,
++    title: 'The Dark Tower',
++    premise: 'A gunslinger pursues the Man in Black across a desert.',
++    genre: 'Dark Fantasy',
++    targetWordCount: 90000,
++    chapterCount: 25,
++    style: { voice: 'sparse and mythic', tense: 'past' as const, pov: 'third-limited' as const },
++    maxRevisionRounds: 5,
++    concurrencyLimit: 3,
++  },
++};
++
++function makeRecord(body: unknown, messageId = 'msg-1'): SQSRecord {
++  return {
++    messageId,
++    receiptHandle: 'handle',
++    body: JSON.stringify(body),
++    attributes: {
++      ApproximateReceiveCount: '1',
++      SentTimestamp: '1000',
++      SenderId: 'sender',
++      ApproximateFirstReceiveTimestamp: '1000',
++    },
++    messageAttributes: {},
++    md5OfBody: 'abc',
++    eventSource: 'aws:sqs',
++    eventSourceARN: 'arn:aws:sqs:us-east-1:123:queue',
++    awsRegion: 'us-east-1',
++  };
++}
++
++function makeEvent(records: SQSRecord[]): SQSEvent {
++  return { Records: records };
++}
++
++let mockProjectServiceMethods: {
++  get: ReturnType<typeof vi.fn>;
++  updateStatus: ReturnType<typeof vi.fn>;
++};
++let mockAgentRunServiceMethods: {
++  create: ReturnType<typeof vi.fn>;
++};
++let mockTaskOutputServiceMethods: {
++  save: ReturnType<typeof vi.fn>;
++};
++
++beforeEach(() => {
++  vi.clearAllMocks();
++
++  for (const [key, value] of Object.entries(baseEnv)) {
++    process.env[key] = value;
++  }
++
++  mockProjectServiceMethods = {
++    get: vi.fn().mockResolvedValue(validProject),
++    updateStatus: vi.fn().mockResolvedValue(undefined),
++  };
++  vi.mocked(ProjectService).mockImplementation(() => mockProjectServiceMethods as never);
++
++  mockAgentRunServiceMethods = {
++    create: vi.fn().mockResolvedValue(undefined),
++  };
++  vi.mocked(AgentRunService).mockImplementation(() => mockAgentRunServiceMethods as never);
++
++  mockTaskOutputServiceMethods = {
++    save: vi.fn().mockResolvedValue(undefined),
++  };
++  vi.mocked(TaskOutputService).mockImplementation(() => mockTaskOutputServiceMethods as never);
++
++  vi.mocked(buildPackagerPrompt).mockReturnValue('mock packager prompt');
++  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/xyz789');
++  vi.mocked(enqueue).mockResolvedValue(undefined);
++});
++
++describe('PACKAGE_MANUSCRIPT — happy path', () => {
++  it('loads the project record from DynamoDB', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockProjectServiceMethods.get).toHaveBeenCalledOnce();
++    expect(mockProjectServiceMethods.get).toHaveBeenCalledWith('proj-123');
++  });
++
++  it('builds the packager prompt from the project config', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(vi.mocked(buildPackagerPrompt)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(buildPackagerPrompt).mock.calls[0]!;
++    expect(params.title).toBe('The Dark Tower');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.chapterCount).toBe(25);
++    expect(params.projectType).toBe('NOVEL');
++  });
++
++  it('launches an ECS Fargate task with correct parameters', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.taskDefinition).toBe(baseEnv.PACKAGER_TASK_DEF_ARN);
++    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
++  });
++
++  it('passes correct environment variables to the ECS task', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.environment['PROJECT_ID']).toBe('proj-123');
++    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
++    expect(typeof params.environment['RUN_ID']).toBe('string');
++    expect(params.environment['AWS_REGION']).toBe('us-east-1');
++    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++  });
++
++  it('creates an agent run record with status RUNNING and workerType packager', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
++    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
++    expect(runItem.projectId).toBe('proj-123');
++    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/xyz789');
++    expect(runItem.workerType).toBe('packager');
++    expect(runItem.status).toBe('RUNNING');
++    expect(typeof runItem.runId).toBe('string');
++    expect(runItem.runId.length).toBeGreaterThan(0);
++  });
++
++  it('saves the system prompt to the task-outputs table', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
++    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
++    expect(outputItem.projectId).toBe('proj-123');
++    expect(outputItem.outputType).toBe('system-prompt');
++    expect(outputItem.content).toBe('mock packager prompt');
++    expect(outputItem.contentLength).toBe('mock packager prompt'.length);
++  });
++
++  it('uses the same runId for agent run and task output records', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
++    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
++    expect(runItem.runId).toBe(outputItem.runId);
++  });
++
++  it('updates the project status to PACKAGING', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledOnce();
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'PACKAGING');
++  });
++
++  it('enqueues a RECONCILE work item with the runId', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
++    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
++    expect(enqueuedItem.type).toBe('RECONCILE');
++    if (enqueuedItem.type === 'RECONCILE') {
++      expect(enqueuedItem.projectId).toBe('proj-123');
++      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
++      expect(enqueuedItem.runId).toBe(runItem.runId);
++    }
++  });
++
++  it('does not return batch failures on success', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toBeUndefined();
++  });
++});
++
++describe('error handling', () => {
++  it('throws when PACKAGER_TASK_DEF_ARN is not set', async () => {
++    delete process.env['PACKAGER_TASK_DEF_ARN'];
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-no-arn')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
++    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when project is not found', async () => {
++    mockProjectServiceMethods.get.mockResolvedValueOnce(undefined);
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-missing' };
++    const event = makeEvent([makeRecord(workItem, 'msg-missing')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
++    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when DynamoDB get throws', async () => {
++    mockProjectServiceMethods.get.mockRejectedValueOnce(new Error('DynamoDB error'));
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-ddb-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ddb-fail' }] });
++  });
++
++  it('returns batch failure when ECS task launch fails', async () => {
++    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
++    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when agent run creation fails', async () => {
++    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when task output save fails', async () => {
++    mockTaskOutputServiceMethods.save.mockRejectedValueOnce(new Error('DynamoDB write error'));
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-output-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-output-fail' }] });
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when updateStatus fails', async () => {
++    mockProjectServiceMethods.updateStatus.mockRejectedValueOnce(new Error('DynamoDB error'));
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-status-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-status-fail' }] });
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when enqueue fails', async () => {
++    vi.mocked(enqueue).mockRejectedValueOnce(new Error('SQS error'));
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-enqueue-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-enqueue-fail' }] });
++  });
++
++  it('reports non-PACKAGE_MANUSCRIPT work items as batch failures', async () => {
++    const workItem = { type: 'BOOTSTRAP_REPO' as const, projectId: 'proj-123', issueNumber: 1 };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
++    expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
++    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++});
+diff --git a/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts b/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
+index c3870b8..f7af761 100644
+--- a/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
+@@ -14,8 +14,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123'),
+@@ -30,7 +30,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../plan-chapters.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+index 0326a0d..918c7d2 100644
+--- a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+@@ -671,9 +671,9 @@ describe('RECONCILE — writer success (valid word count)', () => {
+ 
+     expect(vi.mocked(validateWordCount)).toHaveBeenCalledOnce();
+     const [, target] = vi.mocked(validateWordCount).mock.calls[0]!;
+-    // targetWordCount=90000, chapterCount=3 → 30000 per chapter, ±10%
+-    expect(target.min).toBe(27000);
+-    expect(target.max).toBe(33000);
++    // targetWordCount=90000, chapterCount=3 → 30000 per chapter, writer stage (±5%)
++    expect(target.min).toBe(28500);
++    expect(target.max).toBe(31500);
+   });
+ 
+   it('enqueues REVIEW_CHAPTER when word count is valid', async () => {
+diff --git a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+index d2fdf18..881d117 100644
+--- a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+@@ -16,8 +16,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/editor-abc'),
+@@ -34,7 +34,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../review-chapter.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
+index c168b2c..fae519f 100644
+--- a/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
+@@ -17,8 +17,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/reviser-abc'),
+@@ -36,7 +36,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../revise-chapter.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+index 0b044fb..205605d 100644
+--- a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+@@ -17,8 +17,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/writer-abc'),
+@@ -36,7 +36,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../trigger-chapter.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/continuity-audit.ts b/packages/lambdas/src/handlers/continuity-audit.ts
+index 419240e..f5c46da 100644
+--- a/packages/lambdas/src/handlers/continuity-audit.ts
++++ b/packages/lambdas/src/handlers/continuity-audit.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,7 +8,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -51,41 +50,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: auditorTaskDefArn,
++    workerType: 'auditor',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: auditorTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'auditor',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/continuity-check.ts b/packages/lambdas/src/handlers/continuity-check.ts
+index d3db2a5..72598c1 100644
+--- a/packages/lambdas/src/handlers/continuity-check.ts
++++ b/packages/lambdas/src/handlers/continuity-check.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -10,7 +9,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -78,43 +77,19 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: continuityCheckerTaskDefArn,
++    workerType: 'continuity-checker',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: continuityCheckerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'continuity-checker',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/continuity-fixer.ts b/packages/lambdas/src/handlers/continuity-fixer.ts
+index a9e6fab..d034eef 100644
+--- a/packages/lambdas/src/handlers/continuity-fixer.ts
++++ b/packages/lambdas/src/handlers/continuity-fixer.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,7 +8,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -51,41 +50,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: fixerTaskDefArn,
++    workerType: 'fixer',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: fixerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'fixer',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/create-issues.ts b/packages/lambdas/src/handlers/create-issues.ts
+index 5f5668e..a87e321 100644
+--- a/packages/lambdas/src/handlers/create-issues.ts
++++ b/packages/lambdas/src/handlers/create-issues.ts
+@@ -4,6 +4,7 @@ import {
+   TaskGraphService,
+   createGitHubClient,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+ import { withSQSHandler } from '../shared/index.js';
+@@ -35,9 +36,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   const github = createGitHubClient(config.GITHUB_TOKEN, logger);
+   const repo = { owner: config.GITHUB_ORG, repo: project.repoName };
+ 
+-  const wordCountPerChapter = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountPerChapter = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   // Idempotency: skip if issues were already created for this task graph
+   const alreadyCreated = taskGraph.nodes.every((n) => n.issueNumber !== undefined);
+diff --git a/packages/lambdas/src/handlers/dispatcher.ts b/packages/lambdas/src/handlers/dispatcher.ts
+index 93bbec0..f1da413 100644
+--- a/packages/lambdas/src/handlers/dispatcher.ts
++++ b/packages/lambdas/src/handlers/dispatcher.ts
+@@ -17,6 +17,8 @@ import { handle as handleContinuityCheck } from './continuity-check.js';
+ import { handle as handleContinuityAudit } from './continuity-audit.js';
+ import { handle as handleContinuityFix } from './continuity-fixer.js';
+ import { handle as handleFinalReview } from './final-review.js';
++import { handle as handlePackageManuscript } from './package-manuscript.js';
++import { handle as handleGenerateListing } from './generate-listing.js';
+ 
+ type HandlerFn = (workItem: WorkItem, context: HandlerContext) => Promise<void>;
+ 
+@@ -36,6 +38,8 @@ const handlers: Record<string, HandlerFn> = {
+   CONTINUITY_AUDIT: handleContinuityAudit,
+   CONTINUITY_FIX: handleContinuityFix,
+   FINAL_REVIEW: handleFinalReview,
++  PACKAGE_MANUSCRIPT: handlePackageManuscript,
++  GENERATE_LISTING: handleGenerateListing,
+ };
+ 
+ const sqsHandler = withSQSHandler(async (workItem, context) => {
+diff --git a/packages/lambdas/src/handlers/final-review.ts b/packages/lambdas/src/handlers/final-review.ts
+index 276a80e..8e2a282 100644
+--- a/packages/lambdas/src/handlers/final-review.ts
++++ b/packages/lambdas/src/handlers/final-review.ts
+@@ -5,6 +5,7 @@ import {
+   createGitHubClient,
+   validateWordCount,
+   buildBookWorkflow,
++  enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+ import { withSQSHandler } from '../shared/index.js';
+@@ -64,7 +65,9 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   const chapterCount = taskGraph.nodes.length;
+ 
+-  await projectService.setComplete(projectId, totalWordCount, chapterCount);
++  // Update project with word counts and mark for packaging
++  await projectService.updateWordCount(projectId, totalWordCount);
++  await projectService.updateStatus(projectId, 'PACKAGING');
+ 
+   // Enable the build-book workflow push trigger now that the book is complete
+   const workflowContent = buildBookWorkflow(project.repoName, true);
+@@ -75,7 +78,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     'ci: enable build-book workflow push trigger',
+   );
+ 
+-  logger.info('Final review complete, project marked COMPLETE', {
++  // Hand off to the packaging phase
++  await enqueue(config.SQS_QUEUE_URL, { type: 'PACKAGE_MANUSCRIPT', projectId });
++
++  logger.info('Final review complete, enqueued PACKAGE_MANUSCRIPT', {
+     projectId,
+     totalWordCount,
+     chapterCount,
+diff --git a/packages/lambdas/src/handlers/generate-listing.ts b/packages/lambdas/src/handlers/generate-listing.ts
+new file mode 100644
+index 0000000..937b78d
+--- /dev/null
++++ b/packages/lambdas/src/handlers/generate-listing.ts
+@@ -0,0 +1,66 @@
++import {
++  createDynamoClient,
++  ProjectService,
++  AgentRunService,
++  TaskOutputService,
++  buildMarketerPrompt,
++  enqueue,
++} from '@auto-graph/core';
++import type { WorkItem } from '@auto-graph/core';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
++import type { HandlerContext } from '../shared/index.js';
++
++export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
++  const { logger, config } = context;
++
++  if (workItem.type !== 'GENERATE_LISTING') {
++    throw new Error(`Unexpected work item type: ${workItem.type}`);
++  }
++
++  const { projectId } = workItem;
++
++  const marketerTaskDefArn = process.env['MARKETER_TASK_DEF_ARN'];
++  if (!marketerTaskDefArn) {
++    throw new Error('MARKETER_TASK_DEF_ARN environment variable is not set');
++  }
++
++  const dynamoClient = createDynamoClient(config.AWS_REGION);
++  const projectService = new ProjectService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const agentRunService = new AgentRunService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const taskOutputService = new TaskOutputService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++
++  const project = await projectService.get(projectId);
++  if (!project) {
++    throw new Error(`Project not found: ${projectId}`);
++  }
++
++  const systemPrompt = buildMarketerPrompt({
++    title: project.config.title,
++    repoName: project.repoName,
++    genre: project.config.genre,
++    projectType: project.config.projectType,
++  });
++
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: marketerTaskDefArn,
++    workerType: 'marketer',
++    systemPrompt,
++    projectId,
++    repoName: project.repoName,
++    config,
++    agentRunService,
++    taskOutputService,
++  });
++
++  await projectService.updateStatus(projectId, 'RELEASING');
++
++  await enqueue(config.SQS_QUEUE_URL, {
++    type: 'RECONCILE',
++    projectId,
++    runId,
++  });
++
++  logger.info('Generate listing launched', { projectId, runId, taskArn });
++}
++
++export const handler = withSQSHandler(handle);
+diff --git a/packages/lambdas/src/handlers/generate-outline.ts b/packages/lambdas/src/handlers/generate-outline.ts
+index 0e09b62..ffdc50b 100644
+--- a/packages/lambdas/src/handlers/generate-outline.ts
++++ b/packages/lambdas/src/handlers/generate-outline.ts
+@@ -1,4 +1,3 @@
+-import { randomUUID } from 'node:crypto';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,7 +7,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -46,41 +45,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     series: project.config.series,
+   });
+ 
+-  const runId = randomUUID();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: outlinerTaskDefArn,
++    workerType: 'outliner',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: outlinerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'outliner',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await projectService.updateStatus(projectId, 'OUTLINING');
+diff --git a/packages/lambdas/src/handlers/merge-chapter.ts b/packages/lambdas/src/handlers/merge-chapter.ts
+index 5159b6f..e9d429e 100644
+--- a/packages/lambdas/src/handlers/merge-chapter.ts
++++ b/packages/lambdas/src/handlers/merge-chapter.ts
+@@ -7,13 +7,13 @@ import {
+   evaluateMergeReadiness,
+   validateWordCount,
+   enqueue,
++  resolveWordCountRange,
++  clampToProjectType,
+ } from '@auto-graph/core';
+ import type { PRReview, PRComment, WorkItem } from '@auto-graph/core';
+ import { withSQSHandler } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+-const WORD_COUNT_TOLERANCE = 0.2;
+-
+ function determineEditorialVerdict(
+   reviews: PRReview[],
+   prComments?: PRComment[],
+@@ -103,13 +103,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   const chapterContent = Buffer.from(chapterFile.content, 'base64').toString('utf-8');
+ 
+-  const perChapterTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
+-  const wordCountTarget = {
+-    min: Math.floor(perChapterTarget * (1 - WORD_COUNT_TOLERANCE)),
+-    max: Math.floor(perChapterTarget * (1 + WORD_COUNT_TOLERANCE)),
+-  };
++  const wordCountRange = resolveWordCountRange({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++    stage: 'merge',
++  });
++  const wordCountTarget = clampToProjectType({
++    range: wordCountRange,
++    projectType: project.config.projectType,
++  });
+ 
+   const { wordCount } = validateWordCount(chapterContent, wordCountTarget);
+ 
+diff --git a/packages/lambdas/src/handlers/package-manuscript.ts b/packages/lambdas/src/handlers/package-manuscript.ts
+new file mode 100644
+index 0000000..75ce762
+--- /dev/null
++++ b/packages/lambdas/src/handlers/package-manuscript.ts
+@@ -0,0 +1,66 @@
++import {
++  createDynamoClient,
++  ProjectService,
++  AgentRunService,
++  TaskOutputService,
++  buildPackagerPrompt,
++  enqueue,
++} from '@auto-graph/core';
++import type { WorkItem } from '@auto-graph/core';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
++import type { HandlerContext } from '../shared/index.js';
++
++export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
++  const { logger, config } = context;
++
++  if (workItem.type !== 'PACKAGE_MANUSCRIPT') {
++    throw new Error(`Unexpected work item type: ${workItem.type}`);
++  }
++
++  const { projectId } = workItem;
++
++  const packagerTaskDefArn = process.env['PACKAGER_TASK_DEF_ARN'];
++  if (!packagerTaskDefArn) {
++    throw new Error('PACKAGER_TASK_DEF_ARN environment variable is not set');
++  }
++
++  const dynamoClient = createDynamoClient(config.AWS_REGION);
++  const projectService = new ProjectService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const agentRunService = new AgentRunService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const taskOutputService = new TaskOutputService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++
++  const project = await projectService.get(projectId);
++  if (!project) {
++    throw new Error(`Project not found: ${projectId}`);
++  }
++
++  const systemPrompt = buildPackagerPrompt({
++    title: project.config.title,
++    repoName: project.repoName,
++    chapterCount: project.config.chapterCount,
++    projectType: project.config.projectType,
++  });
++
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: packagerTaskDefArn,
++    workerType: 'packager',
++    systemPrompt,
++    projectId,
++    repoName: project.repoName,
++    config,
++    agentRunService,
++    taskOutputService,
++  });
++
++  await projectService.updateStatus(projectId, 'PACKAGING');
++
++  await enqueue(config.SQS_QUEUE_URL, {
++    type: 'RECONCILE',
++    projectId,
++    runId,
++  });
++
++  logger.info('Package manuscript launched', { projectId, runId, taskArn });
++}
++
++export const handler = withSQSHandler(handle);
+diff --git a/packages/lambdas/src/handlers/plan-chapters.ts b/packages/lambdas/src/handlers/plan-chapters.ts
+index 3b6f5e8..e15dea7 100644
+--- a/packages/lambdas/src/handlers/plan-chapters.ts
++++ b/packages/lambdas/src/handlers/plan-chapters.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,7 +7,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -40,41 +39,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     projectType: project.config.projectType,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: plannerTaskDefArn,
++    workerType: 'planner',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: plannerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'planner',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await projectService.updateStatus(projectId, 'PLANNING');
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 8e2e77f..5879e66 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -13,6 +13,8 @@ import {
+   createGitHubClient,
+   enqueue,
+   validateWordCount,
++  validateListing,
++  resolveWordCountRange,
+ } from '@auto-graph/core';
+ import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
+ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+@@ -164,6 +166,22 @@ async function reEnqueueForRetry(
+       );
+       return true;
+     }
++    case 'packager': {
++      await enqueueReaction(
++        queueUrlPrefix,
++        { type: 'PACKAGE_MANUSCRIPT', projectId },
++        sourceRunId,
++      );
++      return true;
++    }
++    case 'marketer': {
++      await enqueueReaction(
++        queueUrlPrefix,
++        { type: 'GENERATE_LISTING', projectId },
++        sourceRunId,
++      );
++      return true;
++    }
+     default:
+       return false;
+   }
+@@ -606,6 +624,20 @@ async function runReconcile(
+               runId,
+             );
+             reEnqueued = true;
++          } else if (agentRun.workerType === 'packager') {
++            await enqueueReaction(
++              config.SQS_QUEUE_URL,
++              { type: 'PACKAGE_MANUSCRIPT', projectId },
++              runId,
++            );
++            reEnqueued = true;
++          } else if (agentRun.workerType === 'marketer') {
++            await enqueueReaction(
++              config.SQS_QUEUE_URL,
++              { type: 'GENERATE_LISTING', projectId },
++              runId,
++            );
++            reEnqueued = true;
+           }
+           // Note: auditor and fixer failures are handled above with explicit
+           // GitHub-issue creation and feed-forward to FINAL_REVIEW; they are
+@@ -749,14 +781,12 @@ async function runReconcile(
+       );
+       const chapterText = Buffer.from(chapterFile.content, 'base64').toString('utf-8');
+ 
+-      const wordCountTarget = Math.floor(
+-        project.config.targetWordCount / project.config.chapterCount,
+-      );
+-      const tolerance = 0.1;
+-      const { valid, wordCount } = validateWordCount(chapterText, {
+-        min: Math.floor(wordCountTarget * (1 - tolerance)),
+-        max: Math.ceil(wordCountTarget * (1 + tolerance)),
++      const wordCountTarget = resolveWordCountRange({
++        targetWordCount: project.config.targetWordCount,
++        chapterCount: project.config.chapterCount,
++        stage: 'writer',
+       });
++      const { valid, wordCount } = validateWordCount(chapterText, wordCountTarget);
+ 
+       const MAX_WORD_COUNT_RETRIES = 3;
+ 
+@@ -1021,6 +1051,62 @@ async function runReconcile(
+       });
+       break;
+     }
++
++    case 'packager': {
++      // Packager completed — assembled manuscript and created manifest.
++      // Transition to releasing phase.
++      await projectService.updateStatus(projectId, 'RELEASING');
++      await enqueueReaction(
++        config.SQS_QUEUE_URL,
++        { type: 'GENERATE_LISTING', projectId },
++        runId,
++      );
++      logger.info('Packager succeeded, enqueued GENERATE_LISTING', {
++        projectId,
++        runId,
++      });
++      break;
++    }
++
++    case 'marketer': {
++      // Marketer completed — read and validate the store listing
++      let listing;
++      try {
++        const listingFile = await github.getFileContent(
++          repo,
++          'release/listing.json',
++          'main',
++        );
++        const listingContent = Buffer.from(listingFile.content, 'base64').toString('utf-8');
++        listing = JSON.parse(listingContent);
++      } catch (err) {
++        // File missing, unparseable, or encoding error
++        await projectService.updateStatus(projectId, 'FAILED');
++        logger.error('Marketer failed: listing file missing or invalid JSON', {
++          projectId,
++          runId,
++          error: err instanceof Error ? err.message : String(err),
++        });
++        break;
++      }
++
++      const validation = validateListing(listing);
++      if (validation.valid) {
++        await projectService.updateStatus(projectId, 'RELEASED');
++        logger.info('Marketer succeeded, project released', {
++          projectId,
++          runId,
++        });
++      } else {
++        await projectService.updateStatus(projectId, 'FAILED');
++        logger.error('Marketer failed: listing validation errors', {
++          projectId,
++          runId,
++          errors: validation.errors,
++        });
++      }
++      break;
++    }
+   }
+ 
+   logger.info('Reconcile complete', {
+diff --git a/packages/lambdas/src/handlers/review-chapter.ts b/packages/lambdas/src/handlers/review-chapter.ts
+index 8adb20f..6fc6553 100644
+--- a/packages/lambdas/src/handlers/review-chapter.ts
++++ b/packages/lambdas/src/handlers/review-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,9 +7,10 @@ import {
+   createGitHubClient,
+   buildEditorPrompt,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -72,9 +72,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     }
+   }
+ 
+-  const wordCountTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountTarget = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   const systemPrompt = buildEditorPrompt({
+     chapterNumber: node.chapterNumber,
+@@ -87,45 +88,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     revisionRound: node.revisionRound,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: editorTaskDefArn,
++    workerType: 'editor',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: editorTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+       BRANCH_NAME: branchName,
+       PR_NUMBER: String(prNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'editor',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(projectId, taskGraph.version, nodeId, 'REVIEWING', runId);
+diff --git a/packages/lambdas/src/handlers/revise-chapter.ts b/packages/lambdas/src/handlers/revise-chapter.ts
+index 3dd525a..f5b528d 100644
+--- a/packages/lambdas/src/handlers/revise-chapter.ts
++++ b/packages/lambdas/src/handlers/revise-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,9 +8,10 @@ import {
+   createGitHubClient,
+   buildReviserPrompt,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -77,9 +77,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   const paddedChapter = String(node.chapterNumber).padStart(2, '0');
+   const branchName = `chapter-${paddedChapter}`;
+ 
+-  const wordCountTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountTarget = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   const systemPrompt = buildReviserPrompt({
+     reviewComments,
+@@ -107,45 +108,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     return;
+   }
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: reviserTaskDefArn,
++    workerType: 'reviser',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: reviserTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+       BRANCH_NAME: branchName,
+       PR_NUMBER: String(prNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'reviser',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(
+diff --git a/packages/lambdas/src/handlers/trigger-chapter.ts b/packages/lambdas/src/handlers/trigger-chapter.ts
+index cc7047c..74927df 100644
+--- a/packages/lambdas/src/handlers/trigger-chapter.ts
++++ b/packages/lambdas/src/handlers/trigger-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,9 +8,10 @@ import {
+   createGitHubClient,
+   buildWriterPrompt,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -82,9 +82,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     }
+   }
+ 
+-  const wordCountTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountTarget = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   const systemPrompt = buildWriterPrompt({
+     chapterNumber,
+@@ -116,45 +117,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   const paddedChapter = String(chapterNumber).padStart(2, '0');
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: writerTaskDefArn,
++    workerType: 'writer',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: writerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(chapterNumber),
+       BRANCH_NAME: `chapter-${paddedChapter}`,
+       ISSUE_NUMBER: node.issueNumber !== undefined ? String(node.issueNumber) : '',
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'writer',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(projectId, taskGraph.version, nodeId, 'WRITING', runId);
+diff --git a/packages/lambdas/src/shared/index.ts b/packages/lambdas/src/shared/index.ts
+index b800a0b..e0ad805 100644
+--- a/packages/lambdas/src/shared/index.ts
++++ b/packages/lambdas/src/shared/index.ts
+@@ -5,3 +5,5 @@ export type { LaunchECSTaskParams, ECSTaskStatus } from './ecs-launcher.js';
+ export { withErrorHandling } from './error-handler.js';
+ export type { ErrorHandlerOptions } from './error-handler.js';
+ export { success, accepted, badRequest, serverError } from './responses.js';
++export { launchAgentRun } from './launch-agent-run.js';
++export type { LaunchAgentRunParams } from './launch-agent-run.js';
+diff --git a/packages/lambdas/src/shared/launch-agent-run.ts b/packages/lambdas/src/shared/launch-agent-run.ts
+new file mode 100644
+index 0000000..6ca8e02
+--- /dev/null
++++ b/packages/lambdas/src/shared/launch-agent-run.ts
+@@ -0,0 +1,80 @@
++import { ulid } from 'ulid';
++import type { AgentRunService, EnvironmentConfig, TaskOutputService, WorkerType } from '@auto-graph/core';
++import { launchECSTask } from './ecs-launcher.js';
++
++export interface LaunchAgentRunParams {
++  taskDefArn: string;
++  workerType: WorkerType;
++  systemPrompt: string;
++  projectId: string;
++  repoName: string;
++  extraEnv?: Record<string, string> | undefined;
++  config: EnvironmentConfig;
++  agentRunService: AgentRunService;
++  taskOutputService: TaskOutputService;
++  nodeId?: string | undefined;
++}
++
++export async function launchAgentRun(params: LaunchAgentRunParams): Promise<{ runId: string; taskArn: string }> {
++  const {
++    taskDefArn,
++    workerType,
++    systemPrompt,
++    projectId,
++    repoName,
++    extraEnv,
++    config,
++    agentRunService,
++    taskOutputService,
++    nodeId,
++  } = params;
++
++  const runId = ulid();
++  const now = new Date().toISOString();
++
++  await taskOutputService.save({
++    runId,
++    outputType: 'system-prompt',
++    projectId,
++    content: systemPrompt,
++    contentLength: systemPrompt.length,
++    createdAt: now,
++  });
++
++  const baseEnv: Record<string, string> = {
++    PROJECT_ID: projectId,
++    REPO_NAME: repoName,
++    RUN_ID: runId,
++    AWS_REGION: config.AWS_REGION,
++    DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
++  };
++
++  const environment = { ...baseEnv, ...(extraEnv ?? {}) };
++
++  const taskArn = await launchECSTask({
++    taskDefinition: taskDefArn,
++    command: ['claude', '-p', '$SYSTEM_PROMPT'],
++    environment,
++    config,
++    stateMachineArn: process.env['STATE_MACHINE_ARN'],
++    runId,
++    projectId,
++  });
++
++  const runRecord: Parameters<typeof agentRunService.create>[0] = {
++    runId,
++    projectId,
++    taskArn,
++    workerType,
++    status: 'RUNNING',
++    startedAt: now,
++  };
++
++  if (nodeId !== undefined) {
++    runRecord.nodeId = nodeId;
++  }
++
++  await agentRunService.create(runRecord);
++
++  return { runId, taskArn };
++}
+diff --git a/packages/worker/src/entrypoint.ts b/packages/worker/src/entrypoint.ts
+index efc4e10..aa30ecc 100644
+--- a/packages/worker/src/entrypoint.ts
++++ b/packages/worker/src/entrypoint.ts
+@@ -77,6 +77,8 @@ export async function loadWorker(workerType: string): Promise<WorkerModule> {
+       import('./workers/continuity-checker.js') as Promise<WorkerModule>,
+     auditor: () => import('./workers/auditor.js') as Promise<WorkerModule>,
+     fixer: () => import('./workers/continuity-fixer.js') as Promise<WorkerModule>,
++    packager: () => import('./workers/packager.js') as Promise<WorkerModule>,
++    marketer: () => import('./workers/marketer.js') as Promise<WorkerModule>,
+   };
+ 
+   const loader = loaders[workerType];
+diff --git a/packages/worker/src/workers/marketer.ts b/packages/worker/src/workers/marketer.ts
+new file mode 100644
+index 0000000..ec3c2e5
+--- /dev/null
++++ b/packages/worker/src/workers/marketer.ts
+@@ -0,0 +1,9 @@
++import type { WorkerEnv } from '../types.js';
++
++export async function prepare(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // Marketer works on main branch; no branch setup required
++}
++
++export async function finalize(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // The marketer commits and pushes directly — no post-processing needed
++}
+diff --git a/packages/worker/src/workers/packager.ts b/packages/worker/src/workers/packager.ts
+new file mode 100644
+index 0000000..4d9f64a
+--- /dev/null
++++ b/packages/worker/src/workers/packager.ts
+@@ -0,0 +1,9 @@
++import type { WorkerEnv } from '../types.js';
++
++export async function prepare(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // Packager works on main branch; no branch setup required
++}
++
++export async function finalize(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // The packager commits and pushes directly — no post-processing needed
++}

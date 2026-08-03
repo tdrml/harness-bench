@@ -1,0 +1,1108 @@
+diff --git a/packages/lambdas/src/__tests__/integration/concurrency.test.ts b/packages/lambdas/src/__tests__/integration/concurrency.test.ts
+index 6e92874..ada05aa 100644
+--- a/packages/lambdas/src/__tests__/integration/concurrency.test.ts
++++ b/packages/lambdas/src/__tests__/integration/concurrency.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/continuity.test.ts b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+index aab8b67..749c529 100644
+--- a/packages/lambdas/src/__tests__/integration/continuity.test.ts
++++ b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+@@ -36,8 +36,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/escalation.test.ts b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+index 786d7d5..8eede8c 100644
+--- a/packages/lambdas/src/__tests__/integration/escalation.test.ts
++++ b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+@@ -34,8 +34,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+index 94efdd5..631bf43 100644
+--- a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
++++ b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+@@ -40,8 +40,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+ // Mock ECS launcher — launchECSTask returns a fake ARN; getECSTaskStatus
+ // returns STOPPED/0 to simulate immediate successful task completion
+ // ---------------------------------------------------------------------------
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+index dcd9217..857d85c 100644
+--- a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
++++ b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts b/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
+index 3c116c2..46273e5 100644
+--- a/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
++++ b/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+index f6c9882..a5c93c2 100644
+--- a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
++++ b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
+index 83a9d70..ad81e86 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
+@@ -15,8 +15,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/auditor-abc'),
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+index 345fb1c..91dab7e 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+@@ -16,8 +16,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/continuity-abc'),
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
+index d44cd30..b376e46 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
+@@ -15,8 +15,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/fixer-abc'),
+diff --git a/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts b/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
+index 00bce21..6bf42d1 100644
+--- a/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
+@@ -14,8 +14,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123'),
+diff --git a/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts b/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts
+index 2733b4c..671585e 100644
+--- a/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts
+@@ -14,8 +14,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/packager-abc'),
+diff --git a/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts b/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
+index c3870b8..0ef8e65 100644
+--- a/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
+@@ -14,8 +14,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123'),
+diff --git a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+index d2fdf18..4524d34 100644
+--- a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+@@ -16,8 +16,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/editor-abc'),
+diff --git a/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
+index c168b2c..b97960c 100644
+--- a/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
+@@ -17,8 +17,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/reviser-abc'),
+diff --git a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+index 0b044fb..6631b5b 100644
+--- a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+@@ -17,8 +17,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/writer-abc'),
+diff --git a/packages/lambdas/src/handlers/continuity-audit.ts b/packages/lambdas/src/handlers/continuity-audit.ts
+index 419240e..f5c46da 100644
+--- a/packages/lambdas/src/handlers/continuity-audit.ts
++++ b/packages/lambdas/src/handlers/continuity-audit.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,7 +8,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -51,41 +50,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: auditorTaskDefArn,
++    workerType: 'auditor',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: auditorTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'auditor',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/continuity-check.ts b/packages/lambdas/src/handlers/continuity-check.ts
+index d3db2a5..72598c1 100644
+--- a/packages/lambdas/src/handlers/continuity-check.ts
++++ b/packages/lambdas/src/handlers/continuity-check.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -10,7 +9,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -78,43 +77,19 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: continuityCheckerTaskDefArn,
++    workerType: 'continuity-checker',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: continuityCheckerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'continuity-checker',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/continuity-fixer.ts b/packages/lambdas/src/handlers/continuity-fixer.ts
+index a9e6fab..d034eef 100644
+--- a/packages/lambdas/src/handlers/continuity-fixer.ts
++++ b/packages/lambdas/src/handlers/continuity-fixer.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,7 +8,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -51,41 +50,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: fixerTaskDefArn,
++    workerType: 'fixer',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: fixerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'fixer',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/generate-outline.ts b/packages/lambdas/src/handlers/generate-outline.ts
+index 0e09b62..ffdc50b 100644
+--- a/packages/lambdas/src/handlers/generate-outline.ts
++++ b/packages/lambdas/src/handlers/generate-outline.ts
+@@ -1,4 +1,3 @@
+-import { randomUUID } from 'node:crypto';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,7 +7,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -46,41 +45,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     series: project.config.series,
+   });
+ 
+-  const runId = randomUUID();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: outlinerTaskDefArn,
++    workerType: 'outliner',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: outlinerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'outliner',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await projectService.updateStatus(projectId, 'OUTLINING');
+diff --git a/packages/lambdas/src/handlers/package-manuscript.ts b/packages/lambdas/src/handlers/package-manuscript.ts
+index 7a4565c..ea6cd95 100644
+--- a/packages/lambdas/src/handlers/package-manuscript.ts
++++ b/packages/lambdas/src/handlers/package-manuscript.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,7 +7,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -42,41 +41,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     projectType: project.config.projectType,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: packagerTaskDefArn,
++    workerType: 'packager',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: packagerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'packager',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await projectService.updateStatus(projectId, 'PACKAGING');
+diff --git a/packages/lambdas/src/handlers/plan-chapters.ts b/packages/lambdas/src/handlers/plan-chapters.ts
+index 3b6f5e8..e15dea7 100644
+--- a/packages/lambdas/src/handlers/plan-chapters.ts
++++ b/packages/lambdas/src/handlers/plan-chapters.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,7 +7,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -40,41 +39,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     projectType: project.config.projectType,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: plannerTaskDefArn,
++    workerType: 'planner',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: plannerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'planner',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await projectService.updateStatus(projectId, 'PLANNING');
+diff --git a/packages/lambdas/src/handlers/review-chapter.ts b/packages/lambdas/src/handlers/review-chapter.ts
+index 8adb20f..464a44b 100644
+--- a/packages/lambdas/src/handlers/review-chapter.ts
++++ b/packages/lambdas/src/handlers/review-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -10,7 +9,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -87,45 +86,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     revisionRound: node.revisionRound,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: editorTaskDefArn,
++    workerType: 'editor',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: editorTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+       BRANCH_NAME: branchName,
+       PR_NUMBER: String(prNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'editor',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(projectId, taskGraph.version, nodeId, 'REVIEWING', runId);
+diff --git a/packages/lambdas/src/handlers/revise-chapter.ts b/packages/lambdas/src/handlers/revise-chapter.ts
+index 3dd525a..32774a3 100644
+--- a/packages/lambdas/src/handlers/revise-chapter.ts
++++ b/packages/lambdas/src/handlers/revise-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -11,7 +10,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -107,45 +106,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     return;
+   }
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: reviserTaskDefArn,
++    workerType: 'reviser',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: reviserTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+       BRANCH_NAME: branchName,
+       PR_NUMBER: String(prNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'reviser',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(
+diff --git a/packages/lambdas/src/handlers/trigger-chapter.ts b/packages/lambdas/src/handlers/trigger-chapter.ts
+index cc7047c..2f787c0 100644
+--- a/packages/lambdas/src/handlers/trigger-chapter.ts
++++ b/packages/lambdas/src/handlers/trigger-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -11,7 +10,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -116,45 +115,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   const paddedChapter = String(chapterNumber).padStart(2, '0');
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: writerTaskDefArn,
++    workerType: 'writer',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: writerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(chapterNumber),
+       BRANCH_NAME: `chapter-${paddedChapter}`,
+       ISSUE_NUMBER: node.issueNumber !== undefined ? String(node.issueNumber) : '',
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'writer',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(projectId, taskGraph.version, nodeId, 'WRITING', runId);
+diff --git a/packages/lambdas/src/shared/__tests__/launch-agent-run.test.ts b/packages/lambdas/src/shared/__tests__/launch-agent-run.test.ts
+new file mode 100644
+index 0000000..990392f
+--- /dev/null
++++ b/packages/lambdas/src/shared/__tests__/launch-agent-run.test.ts
+@@ -0,0 +1,142 @@
++import { describe, it, expect, vi, beforeEach } from 'vitest';
++
++vi.mock('../ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../ecs-launcher.js')>();
++  return {
++    ...actual,
++    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc'),
++  };
++});
++
++import { launchECSTask } from '../ecs-launcher.js';
++import { launchAgentRun } from '../launch-agent-run.js';
++import type { AgentRunService, EnvironmentConfig, TaskOutputService } from '@auto-graph/core';
++
++const config: EnvironmentConfig = {
++  AWS_REGION: 'us-east-1',
++  DYNAMODB_TABLE_PREFIX: 'test',
++  SQS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123',
++  ECS_CLUSTER_ARN: 'arn:aws:ecs:us-east-1:123:cluster/main',
++  ECS_SUBNETS: 'subnet-aaa',
++  ECS_SECURITY_GROUPS: 'sg-aaa',
++  GITHUB_TOKEN: 'ghp_test',
++  GITHUB_ORG: 'test-org',
++  ORCHESTRATION_REPO: 'test-repo',
++  LOG_LEVEL: 'info',
++};
++
++let create: ReturnType<typeof vi.fn>;
++let save: ReturnType<typeof vi.fn>;
++
++function baseParams() {
++  return {
++    taskDefArn: 'arn:aws:ecs:us-east-1:123:task-definition/writer:1',
++    workerType: 'writer' as const,
++    systemPrompt: 'write chapter 3',
++    projectId: 'proj-123',
++    repoName: 'the-dark-tower',
++    config,
++    agentRunService: { create } as unknown as AgentRunService,
++    taskOutputService: { save } as unknown as TaskOutputService,
++  };
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc');
++  create = vi.fn().mockResolvedValue(undefined);
++  save = vi.fn().mockResolvedValue(undefined);
++  delete process.env['STATE_MACHINE_ARN'];
++});
++
++describe('launchAgentRun', () => {
++  it('returns a ULID run id and the launched task ARN', async () => {
++    const result = await launchAgentRun(baseParams());
++
++    expect(result.runId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
++    expect(result.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/abc');
++  });
++
++  it('saves the system prompt as a task output under the same run id', async () => {
++    const { runId } = await launchAgentRun(baseParams());
++
++    expect(save).toHaveBeenCalledOnce();
++    const [outputItem] = save.mock.calls[0]!;
++    expect(outputItem).toMatchObject({
++      runId,
++      outputType: 'system-prompt',
++      projectId: 'proj-123',
++      content: 'write chapter 3',
++      contentLength: 'write chapter 3'.length,
++    });
++  });
++
++  it('launches the ECS task with the standard environment keys', async () => {
++    const { runId } = await launchAgentRun(baseParams());
++
++    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.taskDefinition).toBe('arn:aws:ecs:us-east-1:123:task-definition/writer:1');
++    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
++    expect(params.environment).toEqual({
++      PROJECT_ID: 'proj-123',
++      REPO_NAME: 'the-dark-tower',
++      RUN_ID: runId,
++      AWS_REGION: 'us-east-1',
++      DYNAMODB_TABLE_PREFIX: 'test',
++    });
++    expect(params.runId).toBe(runId);
++    expect(params.projectId).toBe('proj-123');
++  });
++
++  it('merges extraEnv on top of the standard environment keys', async () => {
++    await launchAgentRun({
++      ...baseParams(),
++      extraEnv: { CHAPTER_NUMBER: '3', BRANCH_NAME: 'chapter-03' },
++    });
++
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.environment['CHAPTER_NUMBER']).toBe('3');
++    expect(params.environment['BRANCH_NAME']).toBe('chapter-03');
++    expect(params.environment['PROJECT_ID']).toBe('proj-123');
++  });
++
++  it('forwards STATE_MACHINE_ARN when it is set', async () => {
++    process.env['STATE_MACHINE_ARN'] = 'arn:aws:states:us-east-1:123:stateMachine:runs';
++
++    await launchAgentRun(baseParams());
++
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.stateMachineArn).toBe('arn:aws:states:us-east-1:123:stateMachine:runs');
++  });
++
++  it('creates the agent run record as RUNNING after the task launches', async () => {
++    const { runId, taskArn } = await launchAgentRun(baseParams());
++
++    expect(create).toHaveBeenCalledOnce();
++    const [runItem] = create.mock.calls[0]!;
++    expect(runItem).toMatchObject({
++      runId,
++      projectId: 'proj-123',
++      taskArn,
++      workerType: 'writer',
++      status: 'RUNNING',
++    });
++    expect(runItem.startedAt).toEqual(expect.any(String));
++    expect(runItem).not.toHaveProperty('nodeId');
++  });
++
++  it('records the nodeId when one is supplied', async () => {
++    await launchAgentRun({ ...baseParams(), nodeId: 'node-7' });
++
++    const [runItem] = create.mock.calls[0]!;
++    expect(runItem.nodeId).toBe('node-7');
++  });
++
++  it('does not create the agent run record when the launch fails', async () => {
++    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++
++    await expect(launchAgentRun(baseParams())).rejects.toThrow('ECS error');
++    expect(create).not.toHaveBeenCalled();
++  });
++});
+diff --git a/packages/lambdas/src/shared/index.ts b/packages/lambdas/src/shared/index.ts
+index b800a0b..97b758b 100644
+--- a/packages/lambdas/src/shared/index.ts
++++ b/packages/lambdas/src/shared/index.ts
+@@ -2,6 +2,8 @@ export type { HandlerContext } from './types.js';
+ export { withSQSHandler } from './middleware.js';
+ export { launchECSTask, getECSTaskStatus } from './ecs-launcher.js';
+ export type { LaunchECSTaskParams, ECSTaskStatus } from './ecs-launcher.js';
++export { launchAgentRun } from './launch-agent-run.js';
++export type { LaunchAgentRunParams } from './launch-agent-run.js';
+ export { withErrorHandling } from './error-handler.js';
+ export type { ErrorHandlerOptions } from './error-handler.js';
+ export { success, accepted, badRequest, serverError } from './responses.js';
+diff --git a/packages/lambdas/src/shared/launch-agent-run.ts b/packages/lambdas/src/shared/launch-agent-run.ts
+new file mode 100644
+index 0000000..121dfa6
+--- /dev/null
++++ b/packages/lambdas/src/shared/launch-agent-run.ts
+@@ -0,0 +1,80 @@
++import { ulid } from 'ulid';
++import type { AgentRunService, TaskOutputService, WorkerType } from '@auto-graph/core';
++import { launchECSTask } from './ecs-launcher.js';
++import type { HandlerContext } from './types.js';
++
++export interface LaunchAgentRunParams {
++  taskDefArn: string;
++  workerType: WorkerType;
++  systemPrompt: string;
++  projectId: string;
++  repoName: string;
++  /** Worker-specific environment entries merged on top of the standard keys. */
++  extraEnv?: Record<string, string> | undefined;
++  config: HandlerContext['config'];
++  agentRunService: AgentRunService;
++  taskOutputService: TaskOutputService;
++  nodeId?: string | undefined;
++}
++
++/**
++ * Starts an ECS worker: mints the run id, persists the system prompt as a task
++ * output, launches the task and records the agent run as RUNNING.
++ */
++export async function launchAgentRun(
++  params: LaunchAgentRunParams,
++): Promise<{ runId: string; taskArn: string }> {
++  const {
++    taskDefArn,
++    workerType,
++    systemPrompt,
++    projectId,
++    repoName,
++    extraEnv,
++    config,
++    agentRunService,
++    taskOutputService,
++    nodeId,
++  } = params;
++
++  const runId = ulid();
++  const now = new Date().toISOString();
++
++  await taskOutputService.save({
++    runId,
++    outputType: 'system-prompt',
++    projectId,
++    content: systemPrompt,
++    contentLength: systemPrompt.length,
++    createdAt: now,
++  });
++
++  const taskArn = await launchECSTask({
++    taskDefinition: taskDefArn,
++    command: ['claude', '-p', '$SYSTEM_PROMPT'],
++    environment: {
++      PROJECT_ID: projectId,
++      REPO_NAME: repoName,
++      RUN_ID: runId,
++      AWS_REGION: config.AWS_REGION,
++      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
++      ...extraEnv,
++    },
++    config,
++    stateMachineArn: process.env['STATE_MACHINE_ARN'],
++    runId,
++    projectId,
++  });
++
++  await agentRunService.create({
++    runId,
++    projectId,
++    taskArn,
++    workerType,
++    ...(nodeId !== undefined ? { nodeId } : {}),
++    status: 'RUNNING',
++    startedAt: now,
++  });
++
++  return { runId, taskArn };
++}

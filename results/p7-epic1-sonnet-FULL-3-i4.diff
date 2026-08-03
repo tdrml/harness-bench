@@ -1,0 +1,1054 @@
+diff --git a/packages/cdk/src/__tests__/auto-graph-stack.test.ts b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+index c55de96..9a606da 100644
+--- a/packages/cdk/src/__tests__/auto-graph-stack.test.ts
++++ b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+@@ -186,8 +186,8 @@ describe('AutoGraphStack', () => {
+   });
+ 
+   describe('ECS Task Definitions', () => {
+-    it('creates exactly 8 Fargate task definitions', () => {
+-      template.resourceCountIs('AWS::ECS::TaskDefinition', 8);
++    it('creates exactly 9 Fargate task definitions', () => {
++      template.resourceCountIs('AWS::ECS::TaskDefinition', 9);
+     });
+ 
+     it('creates outliner task def with 2 vCPU / 8 GB', () => {
+@@ -262,6 +262,15 @@ describe('AutoGraphStack', () => {
+         RequiresCompatibilities: ['FARGATE'],
+       });
+     });
++
++    it('creates packager task def with 2 vCPU / 8 GB', () => {
++      template.hasResourceProperties('AWS::ECS::TaskDefinition', {
++        Family: 'test-packager',
++        Cpu: '2048',
++        Memory: '8192',
++        RequiresCompatibilities: ['FARGATE'],
++      });
++    });
+   });
+ 
+   describe('Lambda functions', () => {
+diff --git a/packages/cdk/src/constructs/compute.ts b/packages/cdk/src/constructs/compute.ts
+index 3f1bbdd..eea9df5 100644
+--- a/packages/cdk/src/constructs/compute.ts
++++ b/packages/cdk/src/constructs/compute.ts
+@@ -33,6 +33,7 @@ const TASK_CONFIGS: TaskConfig[] = [
+   { name: 'continuity-checker', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 15 },
+   { name: 'auditor', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 120 },
+   { name: 'fixer', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 60 },
++  { name: 'packager', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 30 },
+ ];
+ 
+ function toPascalCase(str: string): string {
+diff --git a/packages/core/src/prompts/__tests__/prompts.test.ts b/packages/core/src/prompts/__tests__/prompts.test.ts
+index 15c9015..778a834 100644
+--- a/packages/core/src/prompts/__tests__/prompts.test.ts
++++ b/packages/core/src/prompts/__tests__/prompts.test.ts
+@@ -7,6 +7,7 @@ import { buildReviserPrompt } from '../reviser.js';
+ import { buildContinuityCheckerPrompt } from '../continuity-checker.js';
+ import { buildAuditorPrompt } from '../auditor.js';
+ import { buildContinuityFixerPrompt } from '../continuity-fixer.js';
++import { buildPackagerPrompt } from '../packager.js';
+ import { buildSharedPreamble, GUARD_RAILS, CLI_INSTRUCTIONS, REPO_CONVENTIONS } from '../shared.js';
+ import { ProjectType } from '../../config/schemas.js';
+ import type { ContinuityState } from '../../writing/types.js';
+@@ -1180,6 +1181,76 @@ describe('buildContinuityFixerPrompt — series support', () => {
+   });
+ });
+ 
++// ---------------------------------------------------------------------------
++// buildPackagerPrompt
++// ---------------------------------------------------------------------------
++
++describe('buildPackagerPrompt', () => {
++  const params: Parameters<typeof buildPackagerPrompt>[0] = {
++    title: 'The Dark Tower',
++    repoName: 'the-dark-tower',
++    chapterCount: 24,
++    projectType: ProjectType.NOVEL,
++  };
++
++  it('returns a non-empty string', () => {
++    const result = buildPackagerPrompt(params);
++    expect(result.length).toBeGreaterThan(0);
++  });
++
++  it('includes the title', () => {
++    const result = buildPackagerPrompt(params);
++    expect(result).toContain('The Dark Tower');
++  });
++
++  it('includes the repo name', () => {
++    const result = buildPackagerPrompt(params);
++    expect(result).toContain('the-dark-tower');
++  });
++
++  it('includes the chapter count', () => {
++    const result = buildPackagerPrompt(params);
++    expect(result).toContain('24');
++  });
++
++  it('instructs assembling manuscript/manuscript.md', () => {
++    const result = buildPackagerPrompt(params);
++    expect(result).toContain('manuscript/manuscript.md');
++  });
++
++  it('instructs writing release/manifest.json', () => {
++    const result = buildPackagerPrompt(params);
++    expect(result).toContain('release/manifest.json');
++  });
++
++  it('instructs commit-and-push using git', () => {
++    const result = buildPackagerPrompt(params);
++    expect(result).toContain('git add');
++    expect(result).toContain('git commit');
++    expect(result).toContain('git push');
++  });
++
++  it('includes shared guard rails', () => {
++    const result = buildPackagerPrompt(params);
++    expect(result).toContain('Guard Rails');
++  });
++
++  it('includes shared CLI instructions', () => {
++    const result = buildPackagerPrompt(params);
++    expect(result).toContain('Claude Code CLI');
++  });
++
++  it('uses non-fiction framing for NON_FICTION', () => {
++    const result = buildPackagerPrompt({ ...params, projectType: ProjectType.NON_FICTION });
++    expect(result).toContain('reported non-fiction book');
++  });
++
++  it('does not use non-fiction framing for NOVEL', () => {
++    const result = buildPackagerPrompt(params);
++    expect(result).not.toContain('reported non-fiction book');
++  });
++});
++
+ // ===========================================================================
+ // Non-fiction gates (fiction → non-fiction prompt-content swap)
+ // ===========================================================================
+diff --git a/packages/core/src/prompts/index.ts b/packages/core/src/prompts/index.ts
+index 6ede6b0..8dbc60e 100644
+--- a/packages/core/src/prompts/index.ts
++++ b/packages/core/src/prompts/index.ts
+@@ -22,4 +22,7 @@ export type { AuditorPromptParams } from './auditor.js';
+ export { buildContinuityFixerPrompt } from './continuity-fixer.js';
+ export type { ContinuityFixerPromptParams } from './continuity-fixer.js';
+ 
++export { buildPackagerPrompt } from './packager.js';
++export type { PackagerPromptParams } from './packager.js';
++
+ export { buildSharedPreamble, GUARD_RAILS, CLI_INSTRUCTIONS, REPO_CONVENTIONS } from './shared.js';
+diff --git a/packages/core/src/prompts/packager.ts b/packages/core/src/prompts/packager.ts
+new file mode 100644
+index 0000000..1ed1254
+--- /dev/null
++++ b/packages/core/src/prompts/packager.ts
+@@ -0,0 +1,145 @@
++import { ProjectType } from '../config/schemas.js';
++import { buildSharedPreamble } from './shared.js';
++
++export interface PackagerPromptParams {
++  title: string;
++  repoName: string;
++  chapterCount: number;
++  projectType: ProjectType;
++}
++
++function buildFictionPackagerBody(title: string, chapterCount: number): string {
++  return `## Your Task
++
++### Phase 1 — Assemble the manuscript
++
++Read \`manuscript/chapter-01.md\` through \`manuscript/chapter-${String(chapterCount).padStart(2, '0')}.md\` (zero-padded) in order. Concatenate them into a single \`manuscript/manuscript.md\`:
++
++1. Start with a title page:
++
++   \`\`\`markdown
++   # ${title}
++
++   ---
++   \`\`\`
++
++2. Append each chapter in order, separated by a page break marker (\`\\n\\n---\\n\\n\`) between chapters. Preserve each chapter's \`# Chapter N: Title\` heading exactly as written — do not renumber, retitle, or edit chapter prose.
++3. Do not summarize, trim, or otherwise alter chapter content. \`manuscript/manuscript.md\` is a byte-for-byte concatenation of the source chapters, not a rewrite.
++
++### Phase 2 — Write the release manifest
++
++Write \`release/manifest.json\` describing the packaged release:
++
++\`\`\`json
++{
++  "title": "${title}",
++  "chapterCount": ${chapterCount},
++  "wordCount": <total word count across all chapters>,
++  "generatedAt": "<ISO 8601 timestamp>",
++  "files": {
++    "manuscript": "manuscript/manuscript.md",
++    "chapters": ["manuscript/chapter-01.md", "..."]
++  }
++}
++\`\`\`
++
++Compute \`wordCount\` by summing the word counts of every chapter file. List every chapter file path in \`files.chapters\`, in chapter order.
++
++### Phase 3 — Commit and push
++
++\`\`\`
++git add manuscript/manuscript.md release/manifest.json
++git commit -m "package: assemble manuscript and release manifest"
++git push
++\`\`\``;
++}
++
++function buildNonFictionPackagerBody(title: string, chapterCount: number): string {
++  return `## Your Task
++
++### Phase 1 — Assemble the manuscript
++
++Read \`manuscript/chapter-01.md\` through \`manuscript/chapter-${String(chapterCount).padStart(2, '0')}.md\` (zero-padded) in order. Concatenate them into a single \`manuscript/manuscript.md\`:
++
++1. Start with a title page:
++
++   \`\`\`markdown
++   # ${title}
++
++   ---
++   \`\`\`
++
++2. Append each chapter in order, separated by a page break marker (\`\\n\\n---\\n\\n\`) between chapters. Preserve each chapter's \`# Chapter N: Title\` heading exactly as written — do not renumber, retitle, or edit chapter prose.
++3. Do not summarize, trim, or otherwise alter chapter content, and do not drop or rewrite citations. \`manuscript/manuscript.md\` is a byte-for-byte concatenation of the source chapters, not a rewrite.
++
++### Phase 2 — Write the release manifest
++
++Write \`release/manifest.json\` describing the packaged release:
++
++\`\`\`json
++{
++  "title": "${title}",
++  "chapterCount": ${chapterCount},
++  "wordCount": <total word count across all chapters>,
++  "generatedAt": "<ISO 8601 timestamp>",
++  "files": {
++    "manuscript": "manuscript/manuscript.md",
++    "chapters": ["manuscript/chapter-01.md", "..."]
++  }
++}
++\`\`\`
++
++Compute \`wordCount\` by summing the word counts of every chapter file. List every chapter file path in \`files.chapters\`, in chapter order.
++
++### Phase 3 — Commit and push
++
++\`\`\`
++git add manuscript/manuscript.md release/manifest.json
++git commit -m "package: assemble manuscript and release manifest"
++git push
++\`\`\``;
++}
++
++export function buildPackagerPrompt(params: PackagerPromptParams): string {
++  const { title, repoName, chapterCount, projectType } = params;
++  const isNonFiction = projectType === ProjectType.NON_FICTION;
++
++  const packagerBody = isNonFiction
++    ? buildNonFictionPackagerBody(title, chapterCount)
++    : buildFictionPackagerBody(title, chapterCount);
++
++  const roleIntro = isNonFiction
++    ? `You are the Packager agent for a reported non-fiction book. Every chapter has been written, reviewed, and audited for continuity. Your responsibility is to assemble the final deliverable: a single \`manuscript/manuscript.md\` file concatenated from the individual chapter files, and a \`release/manifest.json\` describing the packaged release.`
++    : `You are the Packager agent. Every chapter has been written, reviewed, and audited for continuity. Your responsibility is to assemble the final deliverable: a single \`manuscript/manuscript.md\` file concatenated from the individual chapter files, and a \`release/manifest.json\` describing the packaged release.`;
++
++  return `# Packager Agent — System Prompt
++
++${roleIntro}
++
++You are not editing prose. Your job is mechanical assembly — concatenation and metadata generation, not rewriting or improving chapter content.
++
++${buildSharedPreamble()}
++
++## Context
++
++- **Repository**: ${repoName}
++- **Title**: ${title}
++- **Total chapters**: ${chapterCount}
++- **Source**: all chapters live at \`manuscript/chapter-NN.md\` on the \`main\` branch.
++
++${packagerBody}
++
++## Self-check before pushing
++
++Before you commit, confirm:
++
++- \`manuscript/manuscript.md\` contains every chapter from 1 to ${chapterCount}, in order, with no content dropped or altered.
++- \`release/manifest.json\` is valid JSON and lists every chapter file.
++- You did not modify any \`manuscript/chapter-NN.md\` file — those are read-only inputs for this stage.
++
++## Important Guidelines
++
++- Do **not** edit, summarize, or reorder chapter content — this stage is assembly only.
++- Do **not** modify \`outline/\` or \`notes/\` files.
++- Write only \`manuscript/manuscript.md\` and \`release/manifest.json\` — no other files.`;
++}
+diff --git a/packages/lambdas/src/__tests__/integration/continuity.test.ts b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+index aab8b67..8a34137 100644
+--- a/packages/lambdas/src/__tests__/integration/continuity.test.ts
++++ b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+@@ -312,7 +312,7 @@ describe('Continuity state propagation', () => {
+ });
+ 
+ describe('Auditor failure creates GitHub issue', () => {
+-  it('creates a GitHub issue and enqueues FINAL_REVIEW when auditor ECS task fails', async () => {
++  it('creates a GitHub issue and enqueues PACKAGE_MANUSCRIPT when auditor ECS task fails', async () => {
+     // Override getECSTaskStatus to return a failure for this test
+     vi.mocked(getECSTaskStatus).mockResolvedValueOnce({ status: 'STOPPED', exitCode: 1 });
+ 
+@@ -344,9 +344,9 @@ describe('Auditor failure creates GitHub issue', () => {
+     expect(labels).toContain('audit-failure');
+     expect(labels).toContain(`project:${PROJECT_ID}`);
+ 
+-    // Should still enqueue FINAL_REVIEW (feed-forward)
++    // Should still enqueue PACKAGE_MANUSCRIPT (feed-forward)
+     expect(pendingQueue).toHaveLength(1);
+-    expect((pendingQueue[0] as { type: string }).type).toBe('FINAL_REVIEW');
++    expect((pendingQueue[0] as { type: string }).type).toBe('PACKAGE_MANUSCRIPT');
+ 
+     // Agent run should be marked FAILED
+     const agentRun = store.agentRuns.get(runId)!;
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+index 1283926..118d80d 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+@@ -18,6 +18,7 @@ import { handler as continuityCheckHandler } from '../../../handlers/continuity-
+ import { handler as continuityAuditHandler } from '../../../handlers/continuity-audit.js';
+ import { handler as continuityFixerHandler } from '../../../handlers/continuity-fixer.js';
+ import { handler as finalReviewHandler } from '../../../handlers/final-review.js';
++import { handler as packageManuscriptHandler } from '../../../handlers/package-manuscript.js';
+ import { handler as reconcileEnqueuerHandler } from '../../../handlers/reconcile-enqueuer.js';
+ 
+ type SQSHandlerFn = (event: SQSEvent, context: never, callback: () => void) => void | Promise<unknown>;
+@@ -38,6 +39,7 @@ const HANDLER_MAP: Record<string, SQSHandlerFn> = {
+   CONTINUITY_AUDIT: continuityAuditHandler,
+   CONTINUITY_FIX: continuityFixerHandler,
+   FINAL_REVIEW: finalReviewHandler,
++  PACKAGE_MANUSCRIPT: packageManuscriptHandler,
+ };
+ 
+ let _msgCounter = 0;
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/test-data.ts b/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
+index 18dcd2c..9b101f5 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
+@@ -123,6 +123,8 @@ export const BASE_ENV: Record<string, string> = {
+     'arn:aws:ecs:us-east-1:123456789:task-definition/auditor:1',
+   FIXER_TASK_DEF_ARN:
+     'arn:aws:ecs:us-east-1:123456789:task-definition/fixer:1',
++  PACKAGER_TASK_DEF_ARN:
++    'arn:aws:ecs:us-east-1:123456789:task-definition/packager:1',
+ };
+ 
+ /** Fake ECS task ARN returned by the mocked launchECSTask. */
+diff --git a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+index 94efdd5..a739144 100644
+--- a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
++++ b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+@@ -130,7 +130,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+     expect(project!.repoUrl).toBe('https://github.com/test-org/the-test-novel');
+   });
+ 
+-  it('runs the full pipeline end-to-end through CONTINUITY_AUDIT to FINAL_REVIEW', async () => {
++  it('runs the full pipeline end-to-end through CONTINUITY_AUDIT, PACKAGE_MANUSCRIPT, and FINAL_REVIEW', async () => {
+     // Kick off from BOOTSTRAP_PROJECT
+     pendingQueue.push({
+       type: 'BOOTSTRAP_PROJECT',
+@@ -144,10 +144,11 @@ describe('Full pipeline flow (1-chapter project)', () => {
+     // Verify final pipeline output
+     expect(pendingQueue).toHaveLength(0);
+ 
+-    // Check that both CONTINUITY_AUDIT and FINAL_REVIEW were processed
++    // Check that CONTINUITY_AUDIT, PACKAGE_MANUSCRIPT, and FINAL_REVIEW were all processed
+     const { enqueue } = await import('@auto-graph/core');
+     const allEnqueued = vi.mocked(enqueue).mock.calls.map(([, item]) => item);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'CONTINUITY_AUDIT')).toBe(true);
++    expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'PACKAGE_MANUSCRIPT')).toBe(true);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'FINAL_REVIEW')).toBe(true);
+ 
+     // Verify DynamoDB state: project created
+@@ -201,6 +202,8 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       'RECONCILE', // auditor
+       'CONTINUITY_FIX',
+       'RECONCILE', // fixer
++      'PACKAGE_MANUSCRIPT',
++      'RECONCILE', // packager
+       'FINAL_REVIEW',
+     ];
+ 
+diff --git a/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts b/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts
+new file mode 100644
+index 0000000..1baa089
+--- /dev/null
++++ b/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts
+@@ -0,0 +1,341 @@
++import { describe, it, expect, vi, beforeEach } from 'vitest';
++import type { SQSEvent, SQSRecord } from 'aws-lambda';
++
++vi.mock('@auto-graph/core', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('@auto-graph/core')>();
++  return {
++    ...actual,
++    createDynamoClient: vi.fn().mockReturnValue({}),
++    ProjectService: vi.fn(),
++    AgentRunService: vi.fn(),
++    TaskOutputService: vi.fn(),
++    buildPackagerPrompt: vi.fn().mockReturnValue('mock packager system prompt'),
++    enqueue: vi.fn().mockResolvedValue(undefined),
++  };
++});
++
++vi.mock('../../shared/index.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++  return {
++    ...actual,
++    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/packager-abc'),
++  };
++});
++
++import {
++  ProjectService,
++  AgentRunService,
++  TaskOutputService,
++  buildPackagerPrompt,
++  enqueue,
++  ProjectType,
++} from '@auto-graph/core';
++import { launchECSTask } from '../../shared/index.js';
++import { handler } from '../package-manuscript.js';
++
++const baseEnv = {
++  AWS_REGION: 'us-east-1',
++  DYNAMODB_TABLE_PREFIX: 'test',
++  SQS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123/test.fifo',
++  ECS_CLUSTER_ARN: 'arn:aws:ecs:us-east-1:123:cluster/test',
++  ECS_SUBNETS: 'subnet-abc',
++  ECS_SECURITY_GROUPS: 'sg-abc',
++  GITHUB_TOKEN: 'ghp_test',
++  GITHUB_ORG: 'test-org',
++  ORCHESTRATION_REPO: 'orchestration-repo',
++  PACKAGER_TASK_DEF_ARN: 'arn:aws:ecs:us-east-1:123:task-definition/packager:1',
++  LOG_LEVEL: 'info',
++};
++
++const validProject = {
++  projectId: 'proj-123',
++  status: 'WRITING' as const,
++  repoName: 'the-dark-tower',
++  repoUrl: 'https://github.com/test-org/the-dark-tower',
++  createdAt: '2024-01-01T00:00:00.000Z',
++  updatedAt: '2024-01-01T00:00:00.000Z',
++  config: {
++    projectId: 'proj-123',
++    projectType: ProjectType.NOVEL,
++    title: 'The Dark Tower',
++    premise: 'A gunslinger pursues the Man in Black across a desert.',
++    genre: 'Dark Fantasy',
++    targetWordCount: 90000,
++    chapterCount: 3,
++    style: { voice: 'sparse and mythic', tense: 'past' as const, pov: 'third-limited' as const },
++    maxRevisionRounds: 5,
++    concurrencyLimit: 3,
++  },
++};
++
++function makeRecord(body: unknown, messageId = 'msg-1'): SQSRecord {
++  return {
++    messageId,
++    receiptHandle: 'handle',
++    body: JSON.stringify(body),
++    attributes: {
++      ApproximateReceiveCount: '1',
++      SentTimestamp: '1000',
++      SenderId: 'sender',
++      ApproximateFirstReceiveTimestamp: '1000',
++    },
++    messageAttributes: {},
++    md5OfBody: 'abc',
++    eventSource: 'aws:sqs',
++    eventSourceARN: 'arn:aws:sqs:us-east-1:123:queue',
++    awsRegion: 'us-east-1',
++  };
++}
++
++function makeEvent(records: SQSRecord[]): SQSEvent {
++  return { Records: records };
++}
++
++let mockProjectServiceMethods: {
++  get: ReturnType<typeof vi.fn>;
++  updateStatus: ReturnType<typeof vi.fn>;
++};
++let mockAgentRunServiceMethods: {
++  create: ReturnType<typeof vi.fn>;
++};
++let mockTaskOutputServiceMethods: {
++  save: ReturnType<typeof vi.fn>;
++};
++
++beforeEach(() => {
++  vi.clearAllMocks();
++
++  for (const [key, value] of Object.entries(baseEnv)) {
++    process.env[key] = value;
++  }
++
++  mockProjectServiceMethods = {
++    get: vi.fn().mockResolvedValue(validProject),
++    updateStatus: vi.fn().mockResolvedValue(undefined),
++  };
++  vi.mocked(ProjectService).mockImplementation(() => mockProjectServiceMethods as never);
++
++  mockAgentRunServiceMethods = {
++    create: vi.fn().mockResolvedValue(undefined),
++  };
++  vi.mocked(AgentRunService).mockImplementation(() => mockAgentRunServiceMethods as never);
++
++  mockTaskOutputServiceMethods = {
++    save: vi.fn().mockResolvedValue(undefined),
++  };
++  vi.mocked(TaskOutputService).mockImplementation(() => mockTaskOutputServiceMethods as never);
++
++  vi.mocked(buildPackagerPrompt).mockReturnValue('mock packager system prompt');
++  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/packager-abc');
++  vi.mocked(enqueue).mockResolvedValue(undefined);
++});
++
++// ---------------------------------------------------------------------------
++// Happy path
++// ---------------------------------------------------------------------------
++
++describe('PACKAGE_MANUSCRIPT — happy path', () => {
++  it('loads the project record from DynamoDB', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockProjectServiceMethods.get).toHaveBeenCalledOnce();
++    expect(mockProjectServiceMethods.get).toHaveBeenCalledWith('proj-123');
++  });
++
++  it('builds the packager prompt with title, repo name, chapter count and project type', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(vi.mocked(buildPackagerPrompt)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(buildPackagerPrompt).mock.calls[0]!;
++    expect(params.title).toBe('The Dark Tower');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.chapterCount).toBe(3);
++    expect(params.projectType).toBe(ProjectType.NOVEL);
++  });
++
++  it('launches packager ECS task with correct task definition', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.taskDefinition).toBe(baseEnv.PACKAGER_TASK_DEF_ARN);
++    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
++  });
++
++  it('passes correct environment variables to the ECS task', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.environment['PROJECT_ID']).toBe('proj-123');
++    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
++    expect(typeof params.environment['RUN_ID']).toBe('string');
++    expect(params.environment['AWS_REGION']).toBe('us-east-1');
++    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++  });
++
++  it('creates an agent run record with workerType packager and no nodeId', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
++    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
++    expect(runItem.projectId).toBe('proj-123');
++    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/packager-abc');
++    expect(runItem.workerType).toBe('packager');
++    expect(runItem.nodeId).toBeUndefined();
++    expect(runItem.status).toBe('RUNNING');
++    expect(typeof runItem.runId).toBe('string');
++    expect(runItem.runId.length).toBeGreaterThan(0);
++  });
++
++  it('saves the system prompt to the task-outputs table', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
++    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
++    expect(outputItem.projectId).toBe('proj-123');
++    expect(outputItem.outputType).toBe('system-prompt');
++    expect(outputItem.content).toBe('mock packager system prompt');
++    expect(outputItem.contentLength).toBe('mock packager system prompt'.length);
++  });
++
++  it('uses the same runId for agent run and task output records', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
++    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
++    expect(runItem.runId).toBe(outputItem.runId);
++  });
++
++  it('sets the project status to PACKAGING', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'PACKAGING');
++  });
++
++  it('enqueues a RECONCILE work item with the runId', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    await handler(event, {} as never, () => {});
++
++    expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
++    const [queueUrl, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    expect(queueUrl).toBe(baseEnv.SQS_QUEUE_URL);
++    expect(enqueuedItem.type).toBe('RECONCILE');
++    if (enqueuedItem.type === 'RECONCILE') {
++      expect(enqueuedItem.projectId).toBe('proj-123');
++      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
++      expect(enqueuedItem.runId).toBe(runItem.runId);
++    }
++  });
++
++  it('does not return batch failures on success', async () => {
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toBeUndefined();
++  });
++});
++
++// ---------------------------------------------------------------------------
++// Error handling
++// ---------------------------------------------------------------------------
++
++describe('PACKAGE_MANUSCRIPT — error handling', () => {
++  it('throws when PACKAGER_TASK_DEF_ARN is not set', async () => {
++    delete process.env['PACKAGER_TASK_DEF_ARN'];
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-no-arn')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
++    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when project is not found', async () => {
++    mockProjectServiceMethods.get.mockResolvedValueOnce(undefined);
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-missing' };
++    const event = makeEvent([makeRecord(workItem, 'msg-missing')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
++    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when ECS task launch fails', async () => {
++    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
++    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when agent run creation fails', async () => {
++    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++
++  it('returns batch failure when enqueue fails', async () => {
++    vi.mocked(enqueue).mockRejectedValueOnce(new Error('SQS error'));
++
++    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem, 'msg-enqueue-fail')]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-enqueue-fail' }] });
++  });
++
++  it('reports non-PACKAGE_MANUSCRIPT work items as batch failures', async () => {
++    const workItem = { type: 'PLAN_CHAPTERS' as const, projectId: 'proj-123' };
++    const event = makeEvent([makeRecord(workItem)]);
++
++    const result = await handler(event, {} as never, () => {});
++
++    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
++    expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
++    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++});
+diff --git a/packages/lambdas/src/handlers/dispatcher.ts b/packages/lambdas/src/handlers/dispatcher.ts
+index 93bbec0..1c21d20 100644
+--- a/packages/lambdas/src/handlers/dispatcher.ts
++++ b/packages/lambdas/src/handlers/dispatcher.ts
+@@ -17,6 +17,7 @@ import { handle as handleContinuityCheck } from './continuity-check.js';
+ import { handle as handleContinuityAudit } from './continuity-audit.js';
+ import { handle as handleContinuityFix } from './continuity-fixer.js';
+ import { handle as handleFinalReview } from './final-review.js';
++import { handle as handlePackageManuscript } from './package-manuscript.js';
+ 
+ type HandlerFn = (workItem: WorkItem, context: HandlerContext) => Promise<void>;
+ 
+@@ -36,6 +37,7 @@ const handlers: Record<string, HandlerFn> = {
+   CONTINUITY_AUDIT: handleContinuityAudit,
+   CONTINUITY_FIX: handleContinuityFix,
+   FINAL_REVIEW: handleFinalReview,
++  PACKAGE_MANUSCRIPT: handlePackageManuscript,
+ };
+ 
+ const sqsHandler = withSQSHandler(async (workItem, context) => {
+diff --git a/packages/lambdas/src/handlers/package-manuscript.ts b/packages/lambdas/src/handlers/package-manuscript.ts
+new file mode 100644
+index 0000000..c12915b
+--- /dev/null
++++ b/packages/lambdas/src/handlers/package-manuscript.ts
+@@ -0,0 +1,89 @@
++import { ulid } from 'ulid';
++import {
++  createDynamoClient,
++  ProjectService,
++  AgentRunService,
++  TaskOutputService,
++  buildPackagerPrompt,
++  enqueue,
++} from '@auto-graph/core';
++import type { WorkItem } from '@auto-graph/core';
++import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import type { HandlerContext } from '../shared/index.js';
++
++export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
++  const { logger, config } = context;
++
++  if (workItem.type !== 'PACKAGE_MANUSCRIPT') {
++    throw new Error(`Unexpected work item type: ${workItem.type}`);
++  }
++
++  const { projectId } = workItem;
++
++  const packagerTaskDefArn = process.env['PACKAGER_TASK_DEF_ARN'];
++  if (!packagerTaskDefArn) {
++    throw new Error('PACKAGER_TASK_DEF_ARN environment variable is not set');
++  }
++
++  const dynamoClient = createDynamoClient(config.AWS_REGION);
++  const projectService = new ProjectService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const agentRunService = new AgentRunService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const taskOutputService = new TaskOutputService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++
++  const project = await projectService.get(projectId);
++  if (!project) {
++    throw new Error(`Project not found: ${projectId}`);
++  }
++
++  const systemPrompt = buildPackagerPrompt({
++    title: project.config.title,
++    repoName: project.repoName,
++    chapterCount: project.config.chapterCount,
++    projectType: project.config.projectType,
++  });
++
++  const runId = ulid();
++  const now = new Date().toISOString();
++
++  await taskOutputService.save({
++    runId,
++    outputType: 'system-prompt',
++    projectId,
++    content: systemPrompt,
++    contentLength: systemPrompt.length,
++    createdAt: now,
++  });
++
++  const taskArn = await launchECSTask({
++    taskDefinition: packagerTaskDefArn,
++    command: ['claude', '-p', '$SYSTEM_PROMPT'],
++    environment: {
++      PROJECT_ID: projectId,
++      REPO_NAME: project.repoName,
++      RUN_ID: runId,
++      AWS_REGION: config.AWS_REGION,
++      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
++    },
++    config,
++    stateMachineArn: process.env['STATE_MACHINE_ARN'],
++    runId,
++    projectId,
++  });
++
++  await agentRunService.create({
++    runId,
++    projectId,
++    taskArn,
++    workerType: 'packager',
++    status: 'RUNNING',
++    startedAt: now,
++  });
++
++  await projectService.updateStatus(projectId, 'PACKAGING');
++
++  await enqueue(config.SQS_QUEUE_URL, { type: 'RECONCILE', projectId, runId });
++
++  logger.info('Packager ECS task launched', { projectId, runId, taskArn });
++}
++
++export const handler = withSQSHandler(handle);
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 8e2e77f..06940e6 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -433,7 +433,7 @@ async function runReconcile(
+       const repo = { owner: config.GITHUB_ORG, repo: project.repoName };
+ 
+       // Auditor failure should not block the pipeline — create a GitHub issue
+-      // for visibility, then skip to FINAL_REVIEW (bypassing the fixer, since
++      // for visibility, then skip to packaging (bypassing the fixer, since
+       // there is no audit report for it to read).
+       if (agentRun.workerType === 'auditor') {
+         await github.createIssue(
+@@ -447,7 +447,7 @@ async function runReconcile(
+             `- **Run ID:** \`${runId}\``,
+             `- **Exit code:** \`${exitCode}\``,
+             '',
+-            'The pipeline has continued to final review. Check CloudWatch logs for the ECS task to diagnose the failure.',
++            'The pipeline has continued to packaging and final review. Check CloudWatch logs for the ECS task to diagnose the failure.',
+             '',
+             '_This issue was created automatically by auto-graph._',
+           ].join('\n'),
+@@ -457,17 +457,18 @@ async function runReconcile(
+ 
+         await enqueueReaction(
+           config.SQS_QUEUE_URL,
+-          { type: 'FINAL_REVIEW', projectId },
++          { type: 'PACKAGE_MANUSCRIPT', projectId },
+           runId,
+         );
+-        logger.info('Enqueued FINAL_REVIEW despite auditor failure (feed-forward)', {
++        logger.info('Enqueued PACKAGE_MANUSCRIPT despite auditor failure (feed-forward)', {
+           projectId, runId,
+         });
+       } else if (agentRun.workerType === 'fixer') {
+         // Fixer failure should not block the pipeline — create a GitHub issue
+-        // for visibility, then proceed to FINAL_REVIEW. Any auto-fixes the
+-        // fixer applied before failing are already on main; unfixed issues
+-        // surface to the human reviewer via the audit report.
++        // for visibility, then proceed to packaging (and on to final review).
++        // Any auto-fixes the fixer applied before failing are already on
++        // main; unfixed issues surface to the human reviewer via the audit
++        // report.
+         await github.createIssue(
+           repo,
+           `Continuity fixer failed (run ${runId})`,
+@@ -479,7 +480,7 @@ async function runReconcile(
+             `- **Run ID:** \`${runId}\``,
+             `- **Exit code:** \`${exitCode}\``,
+             '',
+-            'The pipeline has continued to final review. Continuity issues flagged by the auditor may remain unfixed — see `notes/continuity-audit-report.md` and check CloudWatch logs for the ECS task.',
++            'The pipeline has continued to packaging and final review. Continuity issues flagged by the auditor may remain unfixed — see `notes/continuity-audit-report.md` and check CloudWatch logs for the ECS task.',
+             '',
+             '_This issue was created automatically by auto-graph._',
+           ].join('\n'),
+@@ -489,10 +490,10 @@ async function runReconcile(
+ 
+         await enqueueReaction(
+           config.SQS_QUEUE_URL,
+-          { type: 'FINAL_REVIEW', projectId },
++          { type: 'PACKAGE_MANUSCRIPT', projectId },
+           runId,
+         );
+-        logger.info('Enqueued FINAL_REVIEW despite fixer failure (feed-forward)', {
++        logger.info('Enqueued PACKAGE_MANUSCRIPT despite fixer failure (feed-forward)', {
+           projectId, runId,
+         });
+       } else if (agentRun.nodeId !== undefined) {
+@@ -606,12 +607,19 @@ async function runReconcile(
+               runId,
+             );
+             reEnqueued = true;
++          } else if (agentRun.workerType === 'packager') {
++            await enqueueReaction(
++              config.SQS_QUEUE_URL,
++              { type: 'PACKAGE_MANUSCRIPT', projectId },
++              runId,
++            );
++            reEnqueued = true;
+           }
+           // Note: auditor and fixer failures are handled above with explicit
+-          // GitHub-issue creation and feed-forward to FINAL_REVIEW; they are
+-          // intentionally not retried here because their failures are reached
+-          // via the early `if (agentRun.workerType === 'auditor' | 'fixer')`
+-          // branches and never fall through to this block.
++          // GitHub-issue creation and feed-forward to PACKAGE_MANUSCRIPT; they
++          // are intentionally not retried here because their failures are
++          // reached via the early `if (agentRun.workerType === 'auditor' |
++          // 'fixer')` branches and never fall through to this block.
+           if (reEnqueued) {
+             logger.info('Transient failure (no nodeId), re-enqueued for retry', {
+               projectId, runId, workerType: agentRun.workerType, failedAttempts,
+@@ -1008,6 +1016,23 @@ async function runReconcile(
+ 
+     case 'fixer': {
+       // Fixer completed (either applied fixes or no-opped on a clean audit).
++      // Proceed to packaging, which assembles the manuscript deliverable
++      // before final review closes out the project.
++      await enqueueReaction(
++        config.SQS_QUEUE_URL,
++        { type: 'PACKAGE_MANUSCRIPT', projectId },
++        runId,
++      );
++
++      logger.info('Fixer succeeded, enqueued PACKAGE_MANUSCRIPT', {
++        projectId,
++        runId,
++      });
++      break;
++    }
++
++    case 'packager': {
++      // Packager assembled manuscript/manuscript.md and release/manifest.json.
+       // Proceed to final review.
+       await enqueueReaction(
+         config.SQS_QUEUE_URL,
+@@ -1015,7 +1040,7 @@ async function runReconcile(
+         runId,
+       );
+ 
+-      logger.info('Fixer succeeded, enqueued FINAL_REVIEW', {
++      logger.info('Packager succeeded, enqueued FINAL_REVIEW', {
+         projectId,
+         runId,
+       });
+diff --git a/packages/worker/src/__tests__/entrypoint.test.ts b/packages/worker/src/__tests__/entrypoint.test.ts
+index bd7529d..8df04d2 100644
+--- a/packages/worker/src/__tests__/entrypoint.test.ts
++++ b/packages/worker/src/__tests__/entrypoint.test.ts
+@@ -243,6 +243,12 @@ describe('loadWorker', () => {
+     expect(typeof worker.finalize).toBe('function');
+   });
+ 
++  it('loads the packager worker', async () => {
++    const worker = await loadWorker('packager');
++    expect(typeof worker.prepare).toBe('function');
++    expect(typeof worker.finalize).toBe('function');
++  });
++
+   it('throws for unknown worker type', async () => {
+     await expect(loadWorker('unknown')).rejects.toThrow('Unknown worker type: unknown');
+   });
+diff --git a/packages/worker/src/__tests__/workers.test.ts b/packages/worker/src/__tests__/workers.test.ts
+index 287a607..0f8398e 100644
+--- a/packages/worker/src/__tests__/workers.test.ts
++++ b/packages/worker/src/__tests__/workers.test.ts
+@@ -20,6 +20,10 @@ import {
+   prepare as auditorPrepare,
+   finalize as auditorFinalize,
+ } from '../workers/auditor.js';
++import {
++  prepare as packagerPrepare,
++  finalize as packagerFinalize,
++} from '../workers/packager.js';
+ 
+ const baseEnv: WorkerEnv = {
+   SYSTEM_PROMPT: Buffer.from('test prompt').toString('base64'),
+@@ -286,3 +290,19 @@ describe('auditor worker', () => {
+     expect(vi.mocked(exec)).not.toHaveBeenCalled();
+   });
+ });
++
++// ---------------------------------------------------------------------------
++// Packager worker
++// ---------------------------------------------------------------------------
++
++describe('packager worker', () => {
++  it('prepare does nothing', async () => {
++    await packagerPrepare('/tmp/repo', baseEnv);
++    expect(vi.mocked(exec)).not.toHaveBeenCalled();
++  });
++
++  it('finalize does nothing', async () => {
++    await packagerFinalize('/tmp/repo', baseEnv);
++    expect(vi.mocked(exec)).not.toHaveBeenCalled();
++  });
++});
+diff --git a/packages/worker/src/entrypoint.ts b/packages/worker/src/entrypoint.ts
+index efc4e10..56d0280 100644
+--- a/packages/worker/src/entrypoint.ts
++++ b/packages/worker/src/entrypoint.ts
+@@ -77,6 +77,7 @@ export async function loadWorker(workerType: string): Promise<WorkerModule> {
+       import('./workers/continuity-checker.js') as Promise<WorkerModule>,
+     auditor: () => import('./workers/auditor.js') as Promise<WorkerModule>,
+     fixer: () => import('./workers/continuity-fixer.js') as Promise<WorkerModule>,
++    packager: () => import('./workers/packager.js') as Promise<WorkerModule>,
+   };
+ 
+   const loader = loaders[workerType];
+diff --git a/packages/worker/src/workers/packager.ts b/packages/worker/src/workers/packager.ts
+new file mode 100644
+index 0000000..4019744
+--- /dev/null
++++ b/packages/worker/src/workers/packager.ts
+@@ -0,0 +1,9 @@
++import type { WorkerEnv } from '../types.js';
++
++export async function prepare(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // Packager works on main branch; no branch setup required
++}
++
++export async function finalize(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // The packager commits and pushes the manuscript and manifest directly — no post-processing needed
++}

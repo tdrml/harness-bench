@@ -20,11 +20,39 @@ index 0c391e4..99ec486 100644
  
  export type AgentRunStatus =
    | 'PENDING'
+diff --git a/packages/core/src/queue/__tests__/queue.test.ts b/packages/core/src/queue/__tests__/queue.test.ts
+index 06fc9e1..87dbec7 100644
+--- a/packages/core/src/queue/__tests__/queue.test.ts
++++ b/packages/core/src/queue/__tests__/queue.test.ts
+@@ -75,7 +75,7 @@ describe('parseWorkItem', () => {
+     expect(message).toContain('nodeId');
+   });
+ 
+-  it('parses all 14 work-item types without error', () => {
++  it('parses all work-item types without error', () => {
+     const items: WorkItem[] = [
+       { type: 'BOOTSTRAP_PROJECT', projectId: 'p', issueNumber: 1, issueBody: 'body' },
+       { type: 'BOOTSTRAP_REPO', projectId: 'p', issueNumber: 1 },
+@@ -97,7 +97,10 @@ describe('parseWorkItem', () => {
+       { type: 'CONTINUITY_CHECK', projectId: 'p', nodeId: 'n' },
+       { type: 'TRIGGER_NEXT_CHAPTER', projectId: 'p' },
+       { type: 'RECONCILE_SWEEP' },
++      { type: 'CONTINUITY_AUDIT', projectId: 'p' },
++      { type: 'CONTINUITY_FIX', projectId: 'p' },
+       { type: 'FINAL_REVIEW', projectId: 'p' },
++      { type: 'PACKAGE_MANUSCRIPT', projectId: 'p' },
+     ];
+ 
+     for (const item of items) {
 diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
-index f291e73..a4df96e 100644
+index f291e73..014c8db 100644
 --- a/packages/core/src/queue/index.ts
 +++ b/packages/core/src/queue/index.ts
-@@ -14,6 +14,7 @@ export type {
+@@ -11,9 +11,11 @@ export type {
+   MergeChapterItem,
+   ContinuityCheckItem,
+   ContinuityAuditItem,
++  ContinuityFixItem,
    TriggerNextChapterItem,
    ReconcileSweepItem,
    FinalReviewItem,
@@ -32,7 +60,11 @@ index f291e73..a4df96e 100644
    WorkItem,
  } from './types.js';
  
-@@ -33,6 +34,7 @@ export {
+@@ -30,9 +32,11 @@ export {
+   MergeChapterSchema,
+   ContinuityCheckSchema,
+   ContinuityAuditSchema,
++  ContinuityFixSchema,
    TriggerNextChapterSchema,
    ReconcileSweepSchema,
    FinalReviewSchema,
@@ -41,7 +73,7 @@ index f291e73..a4df96e 100644
  } from './schemas.js';
  
 diff --git a/packages/core/src/queue/schemas.ts b/packages/core/src/queue/schemas.ts
-index 6b43fb3..7e6cd28 100644
+index 6b43fb3..fae651f 100644
 --- a/packages/core/src/queue/schemas.ts
 +++ b/packages/core/src/queue/schemas.ts
 @@ -94,6 +94,12 @@ export const FinalReviewSchema = z.object({
@@ -51,7 +83,7 @@ index 6b43fb3..7e6cd28 100644
 +export const PackageManuscriptSchema = z.object({
 +  type: z.literal('PACKAGE_MANUSCRIPT'),
 +  projectId: z.string().min(1),
-+  runId: z.string().optional(),
++  runId: z.string().min(1).optional(),
 +});
 +
  export const WorkItemSchema = z.discriminatedUnion('type', [

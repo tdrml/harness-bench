@@ -1,0 +1,392 @@
+diff --git a/packages/core/src/index.ts b/packages/core/src/index.ts
+index e0172d6..70ae925 100644
+--- a/packages/core/src/index.ts
++++ b/packages/core/src/index.ts
+@@ -8,4 +8,5 @@ export * from './queue/index.js';
+ export * from './writing/index.js';
+ export * from './prompts/index.js';
+ export * from './merge-policy/index.js';
++export * from './release-policy/index.js';
+ export * from './templates/index.js';
+diff --git a/packages/core/src/release-policy/__tests__/release-policy.test.ts b/packages/core/src/release-policy/__tests__/release-policy.test.ts
+new file mode 100644
+index 0000000..74483df
+--- /dev/null
++++ b/packages/core/src/release-policy/__tests__/release-policy.test.ts
+@@ -0,0 +1,229 @@
++import { describe, it, expect } from 'vitest';
++import {
++  validateListing,
++  MAX_BLURB_LENGTH,
++  REQUIRED_KEYWORD_COUNT,
++  REQUIRED_CATEGORY_COUNT,
++  ALLOWED_BLURB_TAGS,
++} from '../index.js';
++import type { KdpListing } from '../index.js';
++
++function makeListing(overrides: Partial<KdpListing> = {}): KdpListing {
++  return {
++    title: 'The Glass Harbor',
++    subtitle: 'A Novel',
++    blurb: '<b>She thought the harbor was empty.</b><br><br>It was not.',
++    keywords: ['one', 'two', 'three', 'four', 'five', 'six', 'seven'],
++    categories: ['Fiction > Thriller', 'Fiction > Mystery', 'Fiction > Suspense'],
++    author: 'A. Writer',
++    ...overrides,
++  };
++}
++
++const codesOf = (listing: KdpListing): string[] =>
++  validateListing(listing).errors.map((e) => e.code);
++
++describe('constants', () => {
++  it('exposes the KDP limits', () => {
++    expect(MAX_BLURB_LENGTH).toBe(4000);
++    expect(REQUIRED_KEYWORD_COUNT).toBe(7);
++    expect(REQUIRED_CATEGORY_COUNT).toBe(3);
++    expect(ALLOWED_BLURB_TAGS).toEqual(['b', 'i', 'u', 'br', 'p', 'ul', 'li', 'ol', 'h4', 'h5', 'h6']);
++  });
++});
++
++describe('validateListing', () => {
++  describe('valid listings', () => {
++    it('returns valid: true with no errors for a well-formed listing', () => {
++      const result = validateListing(makeListing());
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('accepts a listing without a subtitle', () => {
++      const result = validateListing(makeListing({ subtitle: undefined }));
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('accepts a blurb of exactly the maximum length', () => {
++      const result = validateListing(makeListing({ blurb: 'a'.repeat(MAX_BLURB_LENGTH) }));
++      expect(result.valid).toBe(true);
++    });
++  });
++
++  describe('BLURB_TOO_LONG', () => {
++    it('flags a blurb longer than the maximum', () => {
++      const result = validateListing(makeListing({ blurb: 'a'.repeat(MAX_BLURB_LENGTH + 1) }));
++      expect(result.valid).toBe(false);
++      expect(result.errors).toHaveLength(1);
++      expect(result.errors[0]?.code).toBe('BLURB_TOO_LONG');
++      expect(result.errors[0]?.detail).toContain('4001');
++    });
++
++    it('counts HTML tags toward the limit', () => {
++      const blurb = `<b>${'a'.repeat(MAX_BLURB_LENGTH - 6)}</b>`;
++      expect(blurb).toHaveLength(MAX_BLURB_LENGTH + 1);
++      expect(codesOf(makeListing({ blurb }))).toEqual(['BLURB_TOO_LONG']);
++    });
++  });
++
++  describe('BLURB_EMPTY', () => {
++    it('flags an empty blurb', () => {
++      expect(codesOf(makeListing({ blurb: '' }))).toEqual(['BLURB_EMPTY']);
++    });
++
++    it('flags a whitespace-only blurb', () => {
++      expect(codesOf(makeListing({ blurb: '  \n\t ' }))).toEqual(['BLURB_EMPTY']);
++    });
++  });
++
++  describe('KEYWORD_COUNT', () => {
++    it('flags too few keywords', () => {
++      expect(codesOf(makeListing({ keywords: ['one', 'two'] }))).toEqual(['KEYWORD_COUNT']);
++    });
++
++    it('flags too many keywords', () => {
++      const keywords = Array.from({ length: 8 }, (_, i) => `kw${i}`);
++      const result = validateListing(makeListing({ keywords }));
++      expect(result.errors).toHaveLength(1);
++      expect(result.errors[0]?.detail).toContain('8');
++    });
++
++    it('flags no keywords at all', () => {
++      expect(codesOf(makeListing({ keywords: [] }))).toEqual(['KEYWORD_COUNT']);
++    });
++  });
++
++  describe('CATEGORY_COUNT', () => {
++    it('flags too few categories', () => {
++      expect(codesOf(makeListing({ categories: ['Fiction > Thriller'] }))).toEqual(['CATEGORY_COUNT']);
++    });
++
++    it('flags too many categories', () => {
++      const categories = Array.from({ length: 4 }, (_, i) => `Cat ${i}`);
++      expect(codesOf(makeListing({ categories }))).toEqual(['CATEGORY_COUNT']);
++    });
++  });
++
++  describe('UNRESOLVED_PLACEHOLDER', () => {
++    it('flags a placeholder in the title', () => {
++      expect(codesOf(makeListing({ title: 'TODO: pick a title' }))).toEqual(['UNRESOLVED_PLACEHOLDER']);
++    });
++
++    it('flags a placeholder in the subtitle', () => {
++      expect(codesOf(makeListing({ subtitle: 'TODO: subtitle' }))).toEqual(['UNRESOLVED_PLACEHOLDER']);
++    });
++
++    it('flags a placeholder in the author', () => {
++      expect(codesOf(makeListing({ author: 'TODO: pen name' }))).toEqual(['UNRESOLVED_PLACEHOLDER']);
++    });
++
++    it('flags a placeholder in a keyword entry', () => {
++      const keywords = ['one', 'two', 'three', 'four', 'five', 'six', 'TODO: slot 7'];
++      expect(codesOf(makeListing({ keywords }))).toEqual(['UNRESOLVED_PLACEHOLDER']);
++    });
++
++    it('flags a placeholder in a category entry', () => {
++      const categories = ['Fiction > Thriller', 'TODO: category', 'Fiction > Suspense'];
++      expect(codesOf(makeListing({ categories }))).toEqual(['UNRESOLVED_PLACEHOLDER']);
++    });
++
++    it('reports one error even when several fields hold placeholders', () => {
++      const result = validateListing(
++        makeListing({
++          title: 'TODO: title',
++          subtitle: 'TODO: subtitle',
++          author: 'TODO: author',
++          blurb: 'TODO: blurb copy',
++        }),
++      );
++      expect(result.errors.filter((e) => e.code === 'UNRESOLVED_PLACEHOLDER')).toHaveLength(1);
++    });
++
++    it('does not flag the word TODO without a colon', () => {
++      expect(codesOf(makeListing({ title: 'TODO list of one' }))).toHaveLength(0);
++    });
++  });
++
++  describe('DISALLOWED_HTML', () => {
++    it('accepts every allowed tag', () => {
++      const blurb = ALLOWED_BLURB_TAGS.map((tag) => `<${tag}>text</${tag}>`).join('');
++      expect(codesOf(makeListing({ blurb }))).toHaveLength(0);
++    });
++
++    it('accepts allowed tags in mixed case', () => {
++      expect(codesOf(makeListing({ blurb: '<B>Hook.</B><BR><I>Comps.</I>' }))).toHaveLength(0);
++    });
++
++    it('accepts an allowed tag carrying attributes', () => {
++      expect(codesOf(makeListing({ blurb: '<p align="center">Hook.</p>' }))).toHaveLength(0);
++    });
++
++    it('flags a disallowed tag', () => {
++      const result = validateListing(makeListing({ blurb: '<div>Hook.</div>' }));
++      expect(result.valid).toBe(false);
++      expect(result.errors.map((e) => e.code)).toEqual(['DISALLOWED_HTML']);
++      expect(result.errors[0]?.detail).toContain('div');
++    });
++
++    it('flags a disallowed closing tag on its own', () => {
++      expect(codesOf(makeListing({ blurb: 'Hook.</span>' }))).toEqual(['DISALLOWED_HTML']);
++    });
++
++    it('flags a disallowed tag regardless of case', () => {
++      expect(codesOf(makeListing({ blurb: '<SPAN>Hook.</SPAN>' }))).toEqual(['DISALLOWED_HTML']);
++    });
++
++    it('flags h1 which is outside the allowlist', () => {
++      expect(codesOf(makeListing({ blurb: '<h1>Hook.</h1>' }))).toEqual(['DISALLOWED_HTML']);
++    });
++
++    it('reports one error even with several disallowed tags', () => {
++      const blurb = '<div>Hook.</div><span>More.</span><a href="x">Link.</a>';
++      const result = validateListing(makeListing({ blurb }));
++      expect(result.errors).toHaveLength(1);
++      expect(result.errors[0]?.code).toBe('DISALLOWED_HTML');
++    });
++
++    it('does not treat a bare less-than sign as a tag', () => {
++      expect(codesOf(makeListing({ blurb: 'Fewer than 5 < 10 survivors remain.' }))).toHaveLength(0);
++    });
++
++    it('only inspects the blurb for HTML', () => {
++      expect(codesOf(makeListing({ title: '<div>Title</div>' }))).toHaveLength(0);
++    });
++  });
++
++  describe('multiple errors', () => {
++    it('sorts errors by code ascending', () => {
++      const result = validateListing({
++        title: 'TODO: title',
++        blurb: '<div>x</div>',
++        keywords: [],
++        categories: [],
++        author: 'A. Writer',
++      });
++      expect(result.valid).toBe(false);
++      expect(result.errors.map((e) => e.code)).toEqual([
++        'CATEGORY_COUNT',
++        'DISALLOWED_HTML',
++        'KEYWORD_COUNT',
++        'UNRESOLVED_PLACEHOLDER',
++      ]);
++    });
++
++    it('sorts BLURB_EMPTY before the other codes it can co-occur with', () => {
++      const result = validateListing(makeListing({ blurb: '   ', keywords: [] }));
++      expect(result.errors.map((e) => e.code)).toEqual(['BLURB_EMPTY', 'KEYWORD_COUNT']);
++    });
++
++    it('gives every error a non-empty detail', () => {
++      const result = validateListing(makeListing({ blurb: '', keywords: [], categories: [] }));
++      expect(result.errors.length).toBeGreaterThan(0);
++      for (const error of result.errors) {
++        expect(error.detail.length).toBeGreaterThan(0);
++      }
++    });
++  });
++});
+diff --git a/packages/core/src/release-policy/index.ts b/packages/core/src/release-policy/index.ts
+new file mode 100644
+index 0000000..4496f21
+--- /dev/null
++++ b/packages/core/src/release-policy/index.ts
+@@ -0,0 +1,8 @@
++export type { KdpListing, ListingError, ListingValidation } from './types.js';
++export {
++  validateListing,
++  MAX_BLURB_LENGTH,
++  REQUIRED_KEYWORD_COUNT,
++  REQUIRED_CATEGORY_COUNT,
++  ALLOWED_BLURB_TAGS,
++} from './validate.js';
+diff --git a/packages/core/src/release-policy/types.ts b/packages/core/src/release-policy/types.ts
+new file mode 100644
+index 0000000..a7e5821
+--- /dev/null
++++ b/packages/core/src/release-policy/types.ts
+@@ -0,0 +1,18 @@
++export interface KdpListing {
++  title: string;
++  subtitle?: string | undefined;
++  blurb: string;
++  keywords: string[];
++  categories: string[];
++  author: string;
++}
++
++export interface ListingError {
++  code: string;
++  detail: string;
++}
++
++export interface ListingValidation {
++  valid: boolean;
++  errors: ListingError[];
++}
+diff --git a/packages/core/src/release-policy/validate.ts b/packages/core/src/release-policy/validate.ts
+new file mode 100644
+index 0000000..76b6a26
+--- /dev/null
++++ b/packages/core/src/release-policy/validate.ts
+@@ -0,0 +1,103 @@
++import type { KdpListing, ListingError, ListingValidation } from './types.js';
++
++/** Amazon KDP caps the book description at 4,000 characters including HTML tags. */
++export const MAX_BLURB_LENGTH = 4000;
++
++/** KDP offers exactly 7 backend keyword slots. */
++export const REQUIRED_KEYWORD_COUNT = 7;
++
++/** KDP allows exactly 3 browse categories. */
++export const REQUIRED_CATEGORY_COUNT = 3;
++
++/** HTML tags KDP renders in the book description; everything else is rejected. */
++export const ALLOWED_BLURB_TAGS = [
++  'b',
++  'i',
++  'u',
++  'br',
++  'p',
++  'ul',
++  'li',
++  'ol',
++  'h4',
++  'h5',
++  'h6',
++] as const;
++
++const ALLOWED_TAG_SET = new Set<string>(ALLOWED_BLURB_TAGS);
++
++/** Marker left behind by unfilled listing templates. */
++const PLACEHOLDER_MARKER = 'TODO:';
++
++/** Matches an opening or closing HTML tag and captures its name. */
++const HTML_TAG_PATTERN = /<\/?([a-z][a-z0-9]*)\b[^>]*>/gi;
++
++function findDisallowedTags(blurb: string): string[] {
++  const disallowed: string[] = [];
++  for (const match of blurb.matchAll(HTML_TAG_PATTERN)) {
++    const name = match[1]?.toLowerCase();
++    if (name !== undefined && !ALLOWED_TAG_SET.has(name) && !disallowed.includes(name)) {
++      disallowed.push(name);
++    }
++  }
++  return disallowed;
++}
++
++function collectStringFields(listing: KdpListing): string[] {
++  const fields = [listing.title, listing.blurb, listing.author, ...listing.keywords, ...listing.categories];
++  if (listing.subtitle !== undefined) {
++    fields.push(listing.subtitle);
++  }
++  return fields;
++}
++
++export function validateListing(listing: KdpListing): ListingValidation {
++  const errors: ListingError[] = [];
++
++  if (listing.blurb.length > MAX_BLURB_LENGTH) {
++    errors.push({
++      code: 'BLURB_TOO_LONG',
++      detail: `Blurb is ${listing.blurb.length} characters, exceeding the maximum of ${MAX_BLURB_LENGTH}.`,
++    });
++  }
++
++  if (listing.blurb.trim().length === 0) {
++    errors.push({
++      code: 'BLURB_EMPTY',
++      detail: 'Blurb is empty or whitespace only.',
++    });
++  }
++
++  if (listing.keywords.length !== REQUIRED_KEYWORD_COUNT) {
++    errors.push({
++      code: 'KEYWORD_COUNT',
++      detail: `Expected exactly ${REQUIRED_KEYWORD_COUNT} keywords, found ${listing.keywords.length}.`,
++    });
++  }
++
++  if (listing.categories.length !== REQUIRED_CATEGORY_COUNT) {
++    errors.push({
++      code: 'CATEGORY_COUNT',
++      detail: `Expected exactly ${REQUIRED_CATEGORY_COUNT} categories, found ${listing.categories.length}.`,
++    });
++  }
++
++  if (collectStringFields(listing).some((field) => field.includes(PLACEHOLDER_MARKER))) {
++    errors.push({
++      code: 'UNRESOLVED_PLACEHOLDER',
++      detail: `Listing contains an unresolved "${PLACEHOLDER_MARKER}" placeholder.`,
++    });
++  }
++
++  const disallowedTags = findDisallowedTags(listing.blurb);
++  if (disallowedTags.length > 0) {
++    errors.push({
++      code: 'DISALLOWED_HTML',
++      detail: `Blurb contains disallowed HTML tags: ${disallowedTags.join(', ')}.`,
++    });
++  }
++
++  errors.sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
++
++  return { valid: errors.length === 0, errors };
++}

@@ -1,0 +1,280 @@
+diff --git a/README.md b/README.md
+index e3bd98f..f87b53c 100644
+--- a/README.md
++++ b/README.md
+@@ -16,7 +16,7 @@ A user creates a "kickoff" issue on a (private) orchestration repo with a `kicko
+ Kickoff Issue → Bootstrap Project → Create Repo → Generate Outline → Plan Chapters
+     → Create Issues → Write Chapters (parallel batches) → Editorial Review
+     → Revise (if needed) → Merge → Continuity Check → Next Chapters
+-    → Continuity Audit → Final Review
++    → Continuity Audit → Final Review → Package Manuscript → Generate Listing
+ ```
+ 
+ Each chapter goes through a writing loop:
+@@ -35,8 +35,8 @@ Continuity state (character positions, timeline, plot threads, established facts
+ 
+ AWS-native serverless architecture:
+ 
+-- **15 Lambda handlers** — one per pipeline stage, event-driven via SQS FIFO
+-- **7 ECS Fargate workers** — long-running Claude Code CLI tasks (outliner, planner, writer, editor, reviser, continuity-checker, auditor)
++- **18 Lambda handlers** — one per pipeline stage, event-driven via SQS FIFO
++- **10 ECS Fargate workers** — long-running Claude Code CLI tasks (outliner, planner, writer, editor, reviser, continuity-checker, auditor, fixer, packager, marketer)
+ - **Step Functions** — orchestrates async ECS polling without busy-wait
+ - **DynamoDB** — 5 tables (projects, task-graphs, agent-runs, task-outputs, repo-locks)
+ - **SQS FIFO** — work-item queue with per-project message grouping
+@@ -46,8 +46,8 @@ AWS-native serverless architecture:
+ ```
+ packages/
+   core/       # Shared library: config, DynamoDB services, GitHub client, prompts, queue, writing utilities
+-  lambdas/    # 15 Lambda handlers + integration tests
+-  worker/     # ECS worker entrypoint + 7 worker types (Docker)
++  lambdas/    # 18 Lambda handlers + integration tests
++  worker/     # ECS worker entrypoint + 10 worker types (Docker)
+   cdk/        # AWS CDK infrastructure stack (10 constructs)
+ ```
+ 
+@@ -69,7 +69,10 @@ packages/
+ | **continuity-check** | Launches continuity-checker ECS task, loads existing state from repo |
+ | **trigger-next-chapter** | Finds ready nodes in dependency DAG, respects concurrency limit |
+ | **continuity-audit** | Launches auditor ECS task for holistic full-book continuity audit after all chapters merge |
+-| **final-review** | Tallies word counts, marks project complete |
++| **continuity-fixer** | Launches fixer ECS task to apply auto-fixes for continuity issues |
++| **final-review** | Tallies word counts, transitions project to PACKAGING phase |
++| **package-manuscript** | Launches packager ECS task to assemble final manuscript and manifest |
++| **generate-listing** | Launches marketer ECS task to generate store listing |
+ 
+ A **reconcile-enqueuer** (EventBridge schedule) runs every 5 minutes to detect stalled agent runs and re-enqueue them.
+ 
+@@ -84,6 +87,9 @@ A **reconcile-enqueuer** (EventBridge schedule) runs every 5 minutes to detect s
+ | **reviser** | Incorporates editorial feedback, pushes revisions to same branch |
+ | **continuity-checker** | Audits cross-chapter consistency, produces state delta and report |
+ | **auditor** | Performs holistic full-book continuity audit across all chapters (120-min timeout) |
++| **fixer** | Applies auto-fixes for continuity issues flagged by auditor |
++| **packager** | Assembles final manuscript and generates release manifest |
++| **marketer** | Generates KDP or other platform store listing (blurb, keywords, etc.) |
+ 
+ Workers fetch system prompts from DynamoDB via `RUN_ID` and execute the Claude Code CLI. All workers run on 2 vCPU / 8 GB Fargate tasks.
+ 
+diff --git a/docs/HLD.md b/docs/HLD.md
+index 2c60858..09d75f2 100644
+--- a/docs/HLD.md
++++ b/docs/HLD.md
+@@ -32,16 +32,17 @@ The shared foundation consumed by all other packages.
+ | `github/` | Octokit wrapper for repo creation, issue management, PR lifecycle |
+ | `logger/` | Structured JSON logging with correlation IDs |
+ | `merge-policy/` | Merge readiness evaluation against editorial criteria (word count gate, review approval, continuity pass) |
+-| `prompts/` | System prompt templates for all six agent types (outliner, planner, writer, editor, reviser, continuity-checker) |
++| `prompts/` | System prompt templates for all ten agent types (outliner, planner, writer, editor, reviser, continuity-checker, auditor, fixer, packager, marketer) |
+ | `queue/` | SQS work-item type definitions and enqueue helper |
+ | `writing/` | Writing-domain utilities: continuity tracking, word count validation, chapter markdown parsing, style checking |
+ 
+ ### 2.2 Lambda Handlers (`@auto-graph/lambdas`)
+ 
+-Fourteen event-driven Lambda functions, each handling one work-item type.
++Eighteen event-driven Lambda functions, each handling one work-item type.
+ 
+ | Handler | Trigger | Responsibility |
+ |---|---|---|
++| `webhook-handler` | API Gateway | Receive GitHub webhooks (PR events), route to appropriate handler |
+ | `bootstrap-project` | Webhook (kickoff issue) | Create project record, enqueue `BOOTSTRAP_REPO` |
+ | `bootstrap-repo` | SQS | Create target repo with writing scaffolding, enqueue `GENERATE_OUTLINE` |
+ | `generate-outline` | SQS | Launch outliner ECS task, poll for completion, enqueue `PLAN_CHAPTERS` |
+@@ -49,17 +50,22 @@ Fourteen event-driven Lambda functions, each handling one work-item type.
+ | `create-issues` | SQS | Create GitHub issues from chapter plan, enqueue first `TRIGGER_CHAPTER` |
+ | `trigger-chapter` | SQS | Launch writer ECS task for a chapter batch |
+ | `reconcile` | Step Functions poll | Check ECS task status, sync DynamoDB state |
+-| `reconcile-enqueuer` | EventBridge schedule | Periodic sweep for stalled runs, re-enqueue reconciliation |
+ | `review-chapter` | SQS | Launch editor ECS task for editorial review of chapter PR |
+ | `revise-chapter` | SQS | Launch reviser ECS task with editorial feedback |
+ | `merge-chapter` | SQS | Merge approved chapter PR, enqueue `CONTINUITY_CHECK` |
+ | `continuity-check` | SQS | Launch continuity-checker ECS task, update continuity state |
+ | `trigger-next-chapter` | SQS | Find next chapter(s) with satisfied dependencies, enqueue `TRIGGER_CHAPTER` |
+-| `webhook-handler` | API Gateway | Receive GitHub webhooks (PR events), route to appropriate handler |
++| `continuity-audit` | SQS | Launch auditor ECS task for full-book continuity audit |
++| `continuity-fixer` | SQS | Launch fixer ECS task to auto-fix continuity issues |
++| `final-review` | SQS | Tally word counts, set status to PACKAGING, enqueue `PACKAGE_MANUSCRIPT` |
++| `package-manuscript` | SQS | Launch packager ECS task to assemble manuscript and manifest |
++| `generate-listing` | SQS | Launch marketer ECS task to generate store listing |
++
++A **reconcile-enqueuer** (EventBridge schedule) runs every 5 minutes to detect stalled agent runs and re-enqueue them.
+ 
+ ### 2.3 ECS Workers (`@auto-graph/worker`)
+ 
+-Six purpose-built Fargate task definitions, each running Claude Code CLI with a domain-specific system prompt.
++Ten purpose-built Fargate task definitions, each running Claude Code CLI with a domain-specific system prompt.
+ 
+ | Worker | Purpose | Resources |
+ |---|---|---|
+@@ -69,10 +75,14 @@ Six purpose-built Fargate task definitions, each running Claude Code CLI with a
+ | `editor` | Editorial review against writing criteria | 0.5 vCPU / 2 GB |
+ | `reviser` | Revise chapter based on editorial feedback | 1 vCPU / 4 GB |
+ | `continuity-checker` | Cross-chapter consistency audit | 0.5 vCPU / 2 GB |
++| `auditor` | Full-book continuity audit across all chapters | 1 vCPU / 4 GB |
++| `fixer` | Apply auto-fixes for continuity issues | 0.5 vCPU / 2 GB |
++| `packager` | Assemble manuscript and generate release manifest | 0.5 vCPU / 2 GB |
++| `marketer` | Generate store listing (KDP and other platforms) | 0.5 vCPU / 2 GB |
+ 
+ ### 2.4 CDK Infrastructure (`@auto-graph/cdk`)
+ 
+-A single CDK stack that provisions all AWS resources: VPC, ECS cluster, six task definitions, fourteen Lambda functions, SQS FIFO queues, DynamoDB tables, Step Functions state machines, API Gateway, EventBridge pipes, ECR repository, and CloudWatch alarms.
++A single CDK stack that provisions all AWS resources: VPC, ECS cluster, ten task definitions, eighteen Lambda functions, SQS FIFO queues, DynamoDB tables, Step Functions state machines, API Gateway, EventBridge pipes, ECR repository, and CloudWatch alarms.
+ 
+ ---
+ 
+@@ -126,9 +136,36 @@ User creates kickoff issue on orchestration repo
+                     │                        │
+                     ▼                        ▼
+               ┌───────────────────────────────┐
++              │     CONTINUITY_AUDIT          │
++              │  (full manuscript audit)      │
++              └────────┬────────────────────┘
++                       │ (if issues found)
++                       ▼
++              ┌───────────────────────────────┐
++              │     CONTINUITY_FIX            │
++              │  (apply auto-fixes)           │
++              └────────┬────────────────────┘
++                       │
++                       ▼
++              ┌───────────────────────────────┐
+               │       FINAL_REVIEW            │
+-              │  (full manuscript continuity   │
+-              │   audit after all chapters)    │
++              │  (tally word counts,          │
++              │   set PACKAGING status)       │
++              └────────┬────────────────────┘
++                       │ enqueues PACKAGE_MANUSCRIPT
++                       ▼
++              ┌───────────────────────────────┐
++              │   PACKAGE_MANUSCRIPT          │
++              │  (ECS: packager)              │
++              │  assemble manuscript,         │
++              │   generate manifest)          │
++              └────────┬────────────────────┘
++                       │ enqueues GENERATE_LISTING
++                       ▼
++              ┌───────────────────────────────┐
++              │     GENERATE_LISTING          │
++              │  (ECS: marketer)              │
++              │  create store listing)        │
+               └───────────────────────────────┘
+ ```
+ 
+diff --git a/packages/lambdas/src/handlers/__tests__/final-review.test.ts b/packages/lambdas/src/handlers/__tests__/final-review.test.ts
+index 390555f..a17b6d8 100644
+--- a/packages/lambdas/src/handlers/__tests__/final-review.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/final-review.test.ts
+@@ -72,14 +72,14 @@ const allMergedGraph = {
+ 
+ let mockProjectServiceMethods: {
+   get: ReturnType<typeof vi.fn>;
+-  setComplete: ReturnType<typeof vi.fn>;
++  updateWordCount: ReturnType<typeof vi.fn>;
++  updateStatus: ReturnType<typeof vi.fn>;
+ };
+ let mockTaskGraphServiceMethods: {
+   getLatest: ReturnType<typeof vi.fn>;
+ };
+ let mockGitHubClientMethods: {
+   getFileContent: ReturnType<typeof vi.fn>;
+-  createOrUpdateFile: ReturnType<typeof vi.fn>;
+ };
+ 
+ function makeEvent(projectId: string): SQSEvent {
+@@ -114,7 +114,8 @@ beforeEach(() => {
+ 
+   mockProjectServiceMethods = {
+     get: vi.fn().mockResolvedValue(validProject),
+-    setComplete: vi.fn().mockResolvedValue(undefined),
++    updateWordCount: vi.fn().mockResolvedValue(undefined),
++    updateStatus: vi.fn().mockResolvedValue(undefined),
+   };
+   vi.mocked(ProjectService).mockImplementation(() => mockProjectServiceMethods as never);
+ 
+@@ -125,20 +126,19 @@ beforeEach(() => {
+ 
+   mockGitHubClientMethods = {
+     getFileContent: vi.fn(),
+-    createOrUpdateFile: vi.fn().mockResolvedValue(undefined),
+   };
+   vi.mocked(createGitHubClient).mockReturnValue(mockGitHubClientMethods as never);
+ });
+ 
+ describe('final-review handler', () => {
+-  it('marks project COMPLETE with word counts from task graph nodes', async () => {
++  it('sets project status to PACKAGING and enqueues PACKAGE_MANUSCRIPT', async () => {
+     await handler(makeEvent('proj-123'), {} as never, () => {});
+ 
+-    expect(mockProjectServiceMethods.setComplete).toHaveBeenCalledWith(
++    expect(mockProjectServiceMethods.updateWordCount).toHaveBeenCalledWith(
+       'proj-123',
+       90000, // 30000 + 28000 + 32000
+-      3,
+     );
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'PACKAGING');
+   });
+ 
+   it('falls back to reading chapter files when wordCount is missing', async () => {
+@@ -160,23 +160,11 @@ describe('final-review handler', () => {
+     await handler(makeEvent('proj-123'), {} as never, () => {});
+ 
+     expect(mockGitHubClientMethods.getFileContent).toHaveBeenCalledTimes(3);
+-    expect(mockProjectServiceMethods.setComplete).toHaveBeenCalledWith(
++    expect(mockProjectServiceMethods.updateWordCount).toHaveBeenCalledWith(
+       'proj-123',
+       450, // 100 + 200 + 150
+-      3,
+     );
+-  });
+-
+-  it('enables build-book workflow push trigger after completion', async () => {
+-    await handler(makeEvent('proj-123'), {} as never, () => {});
+-
+-    expect(mockGitHubClientMethods.createOrUpdateFile).toHaveBeenCalledOnce();
+-    const [repo, path, content, message] = mockGitHubClientMethods.createOrUpdateFile.mock.calls[0]!;
+-    expect(repo).toEqual({ owner: 'test-org', repo: 'the-dark-tower' });
+-    expect(path).toBe('.github/workflows/build-book.yml');
+-    expect(content).toContain('push:');
+-    expect(content).toContain("paths: ['manuscript/**'");
+-    expect(message).toContain('enable');
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'PACKAGING');
+   });
+ 
+   it('throws when project is not found', async () => {
+diff --git a/packages/lambdas/src/handlers/final-review.ts b/packages/lambdas/src/handlers/final-review.ts
+index 5e19ac3..9c56557 100644
+--- a/packages/lambdas/src/handlers/final-review.ts
++++ b/packages/lambdas/src/handlers/final-review.ts
+@@ -68,6 +68,9 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   // Store word count for later use in release phase
+   await projectService.updateWordCount(projectId, totalWordCount);
+ 
++  // Set status to PACKAGING and trigger release phase
++  await projectService.updateStatus(projectId, 'PACKAGING');
++
+   // Trigger the release phase (manuscript packaging and listing generation)
+   await enqueue(config.SQS_QUEUE_URL, {
+     type: 'PACKAGE_MANUSCRIPT',
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 1fe370c..9159dc6 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -1040,14 +1040,16 @@ async function runReconcile(
+ 
+     case 'packager': {
+       // Packager completed the manuscript assembly and manifest generation.
+-      // Proceed to listing generation.
++      // Set status to RELEASING and proceed to listing generation.
++      await projectService.updateStatus(projectId, 'RELEASING');
++
+       await enqueueReaction(
+         config.SQS_QUEUE_URL,
+         { type: 'GENERATE_LISTING', projectId },
+         runId,
+       );
+ 
+-      logger.info('Packager succeeded, enqueued GENERATE_LISTING', {
++      logger.info('Packager succeeded, project status set to RELEASING, enqueued GENERATE_LISTING', {
+         projectId,
+         runId,
+       });

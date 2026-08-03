@@ -1,0 +1,692 @@
+diff --git a/packages/core/src/index.ts b/packages/core/src/index.ts
+index 70ae925..189f893 100644
+--- a/packages/core/src/index.ts
++++ b/packages/core/src/index.ts
+@@ -10,3 +10,4 @@ export * from './prompts/index.js';
+ export * from './merge-policy/index.js';
+ export * from './release-policy/index.js';
+ export * from './templates/index.js';
++export * from './word-count-policy/index.js';
+diff --git a/packages/core/src/prompts/editor.ts b/packages/core/src/prompts/editor.ts
+index f9e1dbc..f9c4d97 100644
+--- a/packages/core/src/prompts/editor.ts
++++ b/packages/core/src/prompts/editor.ts
+@@ -2,6 +2,7 @@ import type { ContinuityState } from '../writing/types.js';
+ import type { Style } from '../config/types.js';
+ import { ProjectType } from '../config/schemas.js';
+ import { pruneContinuityState } from '../writing/continuity.js';
++import { formatToleranceForPrompt } from '../word-count-policy/index.js';
+ import { buildSharedPreamble } from './shared.js';
+ 
+ export interface EditorPromptParams {
+@@ -75,7 +76,7 @@ Evaluate the chapter against every criterion below. For each criterion, scan the
+ 1. **Plot Consistency.** Does the chapter follow the master outline? Are all key plot events present? Does the structural-beat label in the outline match what the chapter actually delivers? Does the chapter plant the setups it was supposed to plant and pay off the setups it was supposed to pay off?
+ 2. **Character Voice.** Do characters speak and act in ways consistent with their character-bible profiles? Do the voice signatures hold — vocabulary, syntax, what each character hides behind? In multi-character scenes, are the voices distinct enough that a reader could tell who is speaking without dialogue tags?
+ 3. **Pacing and Scene Structure.** Does each scene have a clear objective, obstacle, escalation, and turn? Do scenes earn their length? Does tension rise across the chapter, or does it sit flat? Is there a chapter-opening hook in motion? Does the chapter close on a beat the reader carries forward?
+-4. **Word Count Compliance.** Is the word count within ±10% of the target (${wordCountTarget.toLocaleString()} words)?
++4. **Word Count Compliance.** Is the word count within ${formatToleranceForPrompt('review')} of the target (${wordCountTarget.toLocaleString()} words)?
+ 5. **Style Adherence.** Tense, POV, and voice as specified in the style guide. Apply this to every paragraph; flag any slip into present tense in a past-tense book, any POV shift, any tonal drift.
+ 6. **Prose Quality.** Specific over generic? Sentence rhythm varied? Sensory grounding present? Or does the prose lean on AI clichés ("she felt a sense of...", "his heart raced", "eyes like...", "the silence was deafening", "couldn't help but...", filtering through verbs of perception, empty modifiers like "very/really/quite", adverbs replacing strong verbs)? Flag specific lines, not abstract complaints.
+ 7. **Subtext and Dialogue.** Do characters speak around their feelings rather than directly stating them, except at moments where direct declaration is earned? Or is dialogue functioning as exposition delivery? Flag any line that exists only to inform the reader rather than to advance the scene.
+@@ -112,7 +113,7 @@ Evaluate the chapter against every criterion below. For each, scan the entire ch
+    - **SOURCING / UNSOURCED SPECIFIC** — a specific number, date, or named entity asserted without a sourceable anchor. The fix is either citation, hedging, or removal.
+ 3. **Subject Fidelity.** This replaces fictional "character voice" for non-fiction. Real, living subjects must be rendered from what the public record establishes about them — published interviews, essays, panels, podcast appearances, LinkedIn posts, press coverage. Flag any depiction that asserts traits, opinions, or behaviors the public record does not support. When the chapter quotes a named subject, the quote must be verbatim from a citable source; do not paraphrase quoted material as if it were quoted material.
+ 4. **Argument and Flow.** This replaces fictional "pacing and scene structure" for non-fiction. Does the chapter make a clear analytical argument? Is the argument grounded in cited specifics rather than generality? Does the analysis flow logically — claim, evidence, implication — or does it drift between unconnected anecdotes? If the chapter has a structural anchor in the outline (a founding decision, a recognition payoff, a pivot), is that anchor *landed* through cited evidence rather than merely asserted? Note: do NOT demand "scene-grade" rendering or "show, don't tell" beats here — analytical rendering is the genre default for reported non-fiction; only flag if the chapter is *unspecific*, not if it is *analytical*.
+-5. **Word Count Compliance.** Is the word count within ±10% of the target (${wordCountTarget.toLocaleString()} words)?
++5. **Word Count Compliance.** Is the word count within ${formatToleranceForPrompt('review')} of the target (${wordCountTarget.toLocaleString()} words)?
+ 6. **Style Adherence.** Tense, POV, and voice as specified in the style guide. Apply this to every paragraph; flag tense slips, POV shifts, and tonal drift. For non-fiction specifically, watch for: present-tense slips in analytical passages ("the platform *is*..." in a past-tense book), and sourcing meta-commentary ("according to the public record we reviewed...") that belongs in the front-matter "On Sourcing" note rather than in the chapter prose.
+ 7. **Prose Quality.** Sentence rhythm varied? Specific over generic? Or does the prose lean on AI tics — repeated rhetorical scaffolding ("the kind of X", "What X taught / bought / added"), inversion-aphorism patterns ("X did not Y. The Y was the X."), hyphen-stack noun phrases, mixed metaphors, abstract modifiers ("very", "really", "quite"), filtering through verbs of perception, adverbs replacing strong verbs? Flag specific lines, not abstract complaints. Do NOT flag fictional "show vs tell" issues; analytical prose telling a reader what a system did is correct for this genre.
+ 8. **Factual Continuity.** This is the non-fiction reframing of fictional continuity. Cross-check the chapter against the master outline, the character bible, the world bible, and the continuity state above. Specifically watch for: date conflicts (year of an event, year of a transition, decade of a trend), tenure math (someone "spent four months" but the chapter places them on the floor for a year), organizational structure (Meridian Holdings vs. Meridian Collective vs. Meridian Pulse kept distinct), named role titles, and direction-of-time errors (X happened "before" Y when it happened after). Quote both sides of any contradiction.${seriesBookNumber !== undefined ? `
+@@ -175,7 +176,7 @@ ${buildSharedPreamble()}
+ - **Voice**: ${style.voice}
+ - **Tense**: ${style.tense}
+ - **POV**: ${style.pov}
+-- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ±10%)
++- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ${formatToleranceForPrompt('review')})
+ 
+ <continuity_state>
+ \`\`\`json
+diff --git a/packages/core/src/prompts/reviser.ts b/packages/core/src/prompts/reviser.ts
+index f527acd..2683487 100644
+--- a/packages/core/src/prompts/reviser.ts
++++ b/packages/core/src/prompts/reviser.ts
+@@ -1,5 +1,6 @@
+ import type { Style } from '../config/types.js';
+ import { ProjectType } from '../config/schemas.js';
++import { formatToleranceForPrompt } from '../word-count-policy/index.js';
+ import { buildSharedPreamble } from './shared.js';
+ 
+ export interface ReviserPromptParams {
+@@ -41,7 +42,7 @@ Apply each step. Apply each to every flagged passage, not only the first.
+ 4. **Revise integratively.** When you change a line, re-read the surrounding paragraph and confirm the change still flows. When you change a paragraph, re-read the surrounding section. Patches that fix one line and break the next are net negative.
+ 5. **Maintain the constraints while you revise.**
+    - Hold the specified voice, tense, and POV throughout the revision.
+-   - Stay within ±10% of the word count target (${wordCountTarget.toLocaleString()} words).
++   - Stay within ${formatToleranceForPrompt('review')} of the word count target (${wordCountTarget.toLocaleString()} words).
+    - Honor every cited factual detail in the bibles and the continuity state.
+    - Keep subject depictions consistent with the public record. **Never introduce fabricated dialogue, interior, sensory texture, or named participants** while revising — the editor's no-fabrication standard applies to your edits too.
+ 6. **Do not re-architect.** Do not refactor sections or rewrite the chapter wholesale unless a CRITICAL comment specifically requires it. Targeted craft revision; not a redraft.
+@@ -56,7 +57,7 @@ Apply each step. Apply each to every flagged passage, not only the first.
+ 3. **Revise integratively.** When you change a line, re-read the surrounding paragraph and confirm the change still flows. When you change a paragraph, re-read the surrounding scene. Patches that fix one line and break the next are net negative.
+ 4. **Maintain the constraints while you revise.**
+    - Hold the specified voice, tense, and POV throughout the revision.
+-   - Stay within ±10% of the word count target (${wordCountTarget.toLocaleString()} words).
++   - Stay within ${formatToleranceForPrompt('review')} of the word count target (${wordCountTarget.toLocaleString()} words).
+    - Honor every continuity detail: the bibles and any continuity state from prior chapters.
+    - Keep character voices consistent with the character bible.
+ 5. **Do not re-architect.** Do not refactor scenes or rewrite the chapter wholesale unless a CRITICAL comment specifically requires it. Targeted craft revision; not a redraft.
+@@ -70,7 +71,7 @@ Before staging, read your revised draft once end to end. Confirm:
+ 
+ - Every CRITICAL and MAJOR comment is addressed.
+ - Tense and POV hold throughout — no new slips introduced by the edits.
+-- Word count is within ±10% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${formatToleranceForPrompt('review')} of ${wordCountTarget.toLocaleString()}.
+ - Every direct quote in the revised passages still names its publication source.
+ - Every analytical inference in the revised passages is explicitly hedged.
+ - No new invented texture (dialogue, interior, sensory detail, named participants) was introduced anywhere — including the parts you didn't touch (it is easy to drift).
+@@ -83,7 +84,7 @@ Before staging, read your revised draft once end to end. Confirm:
+ 
+ - Every CRITICAL and MAJOR comment is addressed.
+ - Tense and POV hold throughout — no new slips introduced by the edits.
+-- Word count is within ±10% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${formatToleranceForPrompt('review')} of ${wordCountTarget.toLocaleString()}.
+ - The continuity state is still honored — no new contradictions.
+ - The prose around each edit still flows naturally with the edit in place.
+ - No new instances of the AI-prose anti-patterns (filtering verbs, body clichés, empty modifiers) appeared in your revisions.`;
+@@ -105,7 +106,7 @@ ${buildSharedPreamble()}
+ ## Revision Assignment
+ 
+ - **Revision Round**: ${revisionRound}
+-- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ±10%)
++- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ${formatToleranceForPrompt('review')})
+ 
+ ## Style Guide
+ 
+diff --git a/packages/core/src/prompts/writer.ts b/packages/core/src/prompts/writer.ts
+index a1a3f47..cbaf400 100644
+--- a/packages/core/src/prompts/writer.ts
++++ b/packages/core/src/prompts/writer.ts
+@@ -2,6 +2,7 @@ import type { ContinuityState } from '../writing/types.js';
+ import type { Style } from '../config/types.js';
+ import { ProjectType } from '../config/schemas.js';
+ import { pruneContinuityState } from '../writing/continuity.js';
++import { formatToleranceForPrompt } from '../word-count-policy/index.js';
+ import { buildSharedPreamble } from './shared.js';
+ 
+ export interface WriterPromptParams {
+@@ -277,7 +278,7 @@ Apply each step. Do not skip the prep — chapters written cold are visibly chap
+ 1. **Prepare and research.** Before drafting, read the chapter summaries for all prior chapters and read the full text of your predecessor chapters${predecessorChapters.length > 0 ? ' (listed in Story Dependencies above)' : ' (the immediately prior chapter, if any)'}. Consult the subject bible for every subject you will write about. Consult the institutional landscape for every entity the chapter touches. Open \`notes/research-notes.md\` to the per-chapter source notes for this chapter; **use WebSearch / WebFetch to verify the chapter's named facts, quotes, and dates** before you commit them to the prose. Cache new findings (URL + accessed date) into the research notes.
+ 2. **Begin the file** with the heading: \`# Chapter ${chapterNumber}: <title from outline>\` on the first line.
+ 3. **Write full prose.** No bullet points, no outlines, no notes inside the file. Every paragraph is narrative or analytical prose.
+-4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (±5%). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
++4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (${formatToleranceForPrompt('writer')}). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
+ 5. **Honor the citations the bibles establish.** Quote subjects only verbatim from cited publications. Name organizations as the bible names them. Use dates the bible has sourced.
+ 6. **Hedge analytical inferences explicitly.** When the public record does not establish a claim, render it as inference: "publicly described as", "by their own account", "according to the company's website", "in a press release dated".
+ 7. **Do not invent.** No fabricated dialogue, no fabricated interior, no fabricated sensory detail, no fabricated named participants. The Editor's first criterion is sourcing discipline; an invented detail flagged on round-1 is a guaranteed revision round.
+@@ -291,7 +292,7 @@ Apply each step. Do not skip the prep — chapters written cold are visibly chap
+ 1. **Prepare.** Before drafting, read the chapter summaries for all prior chapters and read the full text of your predecessor chapters${predecessorChapters.length > 0 ? ' (listed in Story Dependencies above)' : ' (the immediately prior chapter, if any)'}. Consult the character bible for every character you will write. Consult the world bible for every location and rule the chapter touches. Consult the continuity state above.
+ 2. **Begin the file** with the heading: \`# Chapter ${chapterNumber}: <title from outline>\` on the first line.
+ 3. **Write full prose.** No bullet points, no outlines, no notes inside the file. Every paragraph is narrative prose.
+-4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (±5%). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
++4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (${formatToleranceForPrompt('writer')}). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
+ 5. **Maintain continuity.** Honor every character status, location, timeline event, and world-state detail in the continuity state above. Honor the bibles.
+ 6. **Keep voices consistent** with the character bible's voice signatures.
+ 7. **Respect the world-rule costs and limits** from the world bible.
+@@ -305,7 +306,7 @@ Apply each step. Do not skip the prep — chapters written cold are visibly chap
+ Read your draft once before staging. Catch these classes of issue while you can fix them:
+ 
+ - Tense and POV hold throughout — no slips into present tense for "vivid" passages, no narrative-omniscient interior on real subjects.
+-- Word count is within ±5% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${formatToleranceForPrompt('writer')} of ${wordCountTarget.toLocaleString()}.
+ - Every direct quote names its publication source in the prose.
+ - Every analytical inference is explicitly hedged.
+ - No invented texture: no fabricated dialogue, interior, sensory detail, or named participants in undocumented meetings.
+@@ -319,7 +320,7 @@ Read your draft once before staging. Catch these classes of issue while you can
+ Read your draft once before staging. Catch these classes of issue while you can fix them:
+ 
+ - Tense and POV hold throughout — no slips.
+-- Word count is within ±5% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${formatToleranceForPrompt('writer')} of ${wordCountTarget.toLocaleString()}.
+ - Every scene has an objective, an obstacle, an escalation, and a turn.
+ - The opening is in motion; the close has weight.
+ - The continuity state is honored — no contradictions.
+@@ -337,7 +338,7 @@ ${buildSharedPreamble()}
+ 
+ - **Chapter Number**: ${chapterNumber}
+ - **Output File**: \`${chapterFile}\`
+-- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (aim for ±5%)
++- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (aim for ${formatToleranceForPrompt('writer')})
+ 
+ ## Style Guide
+ 
+diff --git a/packages/core/src/word-count-policy/__tests__/word-count-policy.test.ts b/packages/core/src/word-count-policy/__tests__/word-count-policy.test.ts
+new file mode 100644
+index 0000000..e870259
+--- /dev/null
++++ b/packages/core/src/word-count-policy/__tests__/word-count-policy.test.ts
+@@ -0,0 +1,230 @@
++import { describe, it, expect } from 'vitest';
++import {
++  resolveChapterTarget,
++  resolveTolerance,
++  resolveWordCountRange,
++  formatToleranceForPrompt,
++  clampToProjectType,
++} from '../index.js';
++import { ProjectType } from '../../config/index.js';
++
++describe('resolveChapterTarget', () => {
++  it('computes floor division of targetWordCount by chapterCount', () => {
++    const target = resolveChapterTarget({
++      targetWordCount: 90000,
++      chapterCount: 3,
++    });
++    expect(target).toBe(30000);
++  });
++
++  it('floors the result', () => {
++    const target = resolveChapterTarget({
++      targetWordCount: 100000,
++      chapterCount: 3,
++    });
++    expect(target).toBe(33333);
++  });
++
++  it('throws when chapterCount is 0', () => {
++    expect(() => {
++      resolveChapterTarget({
++        targetWordCount: 90000,
++        chapterCount: 0,
++      });
++    }).toThrow('chapterCount must be greater than 0');
++  });
++
++  it('throws when chapterCount is negative', () => {
++    expect(() => {
++      resolveChapterTarget({
++        targetWordCount: 90000,
++        chapterCount: -1,
++      });
++    }).toThrow('chapterCount must be greater than 0');
++  });
++});
++
++describe('resolveTolerance', () => {
++  it('returns 0.05 for writer stage', () => {
++    expect(resolveTolerance('writer')).toBe(0.05);
++  });
++
++  it('returns 0.10 for review stage', () => {
++    expect(resolveTolerance('review')).toBe(0.10);
++  });
++
++  it('returns 0.20 for merge stage', () => {
++    expect(resolveTolerance('merge')).toBe(0.20);
++  });
++});
++
++describe('resolveWordCountRange', () => {
++  it('calculates range for writer stage (±5%)', () => {
++    const range = resolveWordCountRange({
++      targetWordCount: 90000,
++      chapterCount: 3,
++      stage: 'writer',
++    });
++    // target = 30000, tolerance = 0.05
++    // min = floor(30000 * 0.95) = floor(28500) = 28500
++    // max = ceil(30000 * 1.05) = ceil(31500) = 31500
++    expect(range.min).toBe(28500);
++    expect(range.max).toBe(31500);
++  });
++
++  it('calculates range for review stage (±10%)', () => {
++    const range = resolveWordCountRange({
++      targetWordCount: 90000,
++      chapterCount: 3,
++      stage: 'review',
++    });
++    // target = 30000, tolerance = 0.10
++    // min = floor(30000 * 0.90) = floor(27000) = 27000
++    // max = ceil(30000 * 1.10) = ceil(33000) = 33000
++    expect(range.min).toBe(27000);
++    expect(range.max).toBe(33000);
++  });
++
++  it('calculates range for merge stage (±20%)', () => {
++    const range = resolveWordCountRange({
++      targetWordCount: 90000,
++      chapterCount: 3,
++      stage: 'merge',
++    });
++    // target = 30000, tolerance = 0.20
++    // min = floor(30000 * 0.80) = floor(24000) = 24000
++    // max = ceil(30000 * 1.20) = ceil(36000) = 36000
++    expect(range.min).toBe(24000);
++    expect(range.max).toBe(36000);
++  });
++
++  it('uses floor for min and ceil for max consistently', () => {
++    const range = resolveWordCountRange({
++      targetWordCount: 100000,
++      chapterCount: 3,
++      stage: 'review',
++    });
++    // target = 33333, tolerance = 0.10
++    // min = floor(33333 * 0.90) = floor(29999.7) = 29999
++    // max = ceil(33333 * 1.10) = ceil(36666.3) = 36667
++    expect(range.min).toBe(29999);
++    expect(range.max).toBe(36667);
++  });
++
++  it('throws when chapterCount is 0', () => {
++    expect(() => {
++      resolveWordCountRange({
++        targetWordCount: 90000,
++        chapterCount: 0,
++        stage: 'writer',
++      });
++    }).toThrow('chapterCount must be greater than 0');
++  });
++});
++
++describe('formatToleranceForPrompt', () => {
++  it('returns ±5% for writer stage', () => {
++    expect(formatToleranceForPrompt('writer')).toBe('±5%');
++  });
++
++  it('returns ±10% for review stage', () => {
++    expect(formatToleranceForPrompt('review')).toBe('±10%');
++  });
++
++  it('returns ±20% for merge stage', () => {
++    expect(formatToleranceForPrompt('merge')).toBe('±20%');
++  });
++});
++
++describe('clampToProjectType', () => {
++  it('clamps range into NOVEL chapterMin/chapterMax bounds', () => {
++    const range = { min: 1000, max: 6000 };
++    const clamped = clampToProjectType({
++      range,
++      projectType: ProjectType.NOVEL,
++    });
++    // NOVEL: chapterMin=3000, chapterMax=5000
++    // min = min(max(1000, 3000), 5000) = min(3000, 5000) = 3000
++    // max = min(max(6000, 3000), 5000) = min(6000, 5000) = 5000
++    expect(clamped.min).toBe(3000);
++    expect(clamped.max).toBe(5000);
++  });
++
++  it('clamps range entirely below projectType bounds to lower bound', () => {
++    const range = { min: 500, max: 1500 };
++    const clamped = clampToProjectType({
++      range,
++      projectType: ProjectType.NOVEL,
++    });
++    // NOVEL: chapterMin=3000, chapterMax=5000
++    // min = min(max(500, 3000), 5000) = min(3000, 5000) = 3000
++    // max = min(max(1500, 3000), 5000) = min(3000, 5000) = 3000
++    expect(clamped.min).toBe(3000);
++    expect(clamped.max).toBe(3000);
++  });
++
++  it('clamps range entirely above projectType bounds to upper bound', () => {
++    const range = { min: 6000, max: 8000 };
++    const clamped = clampToProjectType({
++      range,
++      projectType: ProjectType.NOVEL,
++    });
++    // NOVEL: chapterMin=3000, chapterMax=5000
++    // min = min(max(6000, 3000), 5000) = min(6000, 5000) = 5000
++    // max = min(max(8000, 3000), 5000) = min(8000, 5000) = 5000
++    expect(clamped.min).toBe(5000);
++    expect(clamped.max).toBe(5000);
++  });
++
++  it('preserves range when already within bounds', () => {
++    const range = { min: 3500, max: 4500 };
++    const clamped = clampToProjectType({
++      range,
++      projectType: ProjectType.NOVEL,
++    });
++    expect(clamped.min).toBe(3500);
++    expect(clamped.max).toBe(4500);
++  });
++
++  it('works with NOVELLA projectType', () => {
++    const range = { min: 1000, max: 5000 };
++    const clamped = clampToProjectType({
++      range,
++      projectType: ProjectType.NOVELLA,
++    });
++    // NOVELLA: chapterMin=2500, chapterMax=4000
++    expect(clamped.min).toBe(2500);
++    expect(clamped.max).toBe(4000);
++  });
++
++  it('works with SHORT_STORY_COLLECTION projectType', () => {
++    const range = { min: 2000, max: 9000 };
++    const clamped = clampToProjectType({
++      range,
++      projectType: ProjectType.SHORT_STORY_COLLECTION,
++    });
++    // SHORT_STORY_COLLECTION: chapterMin=3000, chapterMax=8000
++    expect(clamped.min).toBe(3000);
++    expect(clamped.max).toBe(8000);
++  });
++
++  it('works with NON_FICTION projectType', () => {
++    const range = { min: 2000, max: 7000 };
++    const clamped = clampToProjectType({
++      range,
++      projectType: ProjectType.NON_FICTION,
++    });
++    // NON_FICTION: chapterMin=3000, chapterMax=6000
++    expect(clamped.min).toBe(3000);
++    expect(clamped.max).toBe(6000);
++  });
++
++  it('throws on unknown projectType', () => {
++    expect(() => {
++      clampToProjectType({
++        range: { min: 1000, max: 5000 },
++        projectType: 'UNKNOWN' as ProjectType,
++      });
++    }).toThrow('Unknown projectType');
++  });
++});
+diff --git a/packages/core/src/word-count-policy/index.ts b/packages/core/src/word-count-policy/index.ts
+new file mode 100644
+index 0000000..9eaf5ba
+--- /dev/null
++++ b/packages/core/src/word-count-policy/index.ts
+@@ -0,0 +1,8 @@
++export type { WordCountStage } from './types.js';
++export {
++  resolveChapterTarget,
++  resolveTolerance,
++  resolveWordCountRange,
++  formatToleranceForPrompt,
++  clampToProjectType,
++} from './resolve.js';
+diff --git a/packages/core/src/word-count-policy/resolve.ts b/packages/core/src/word-count-policy/resolve.ts
+new file mode 100644
+index 0000000..b2c7520
+--- /dev/null
++++ b/packages/core/src/word-count-policy/resolve.ts
+@@ -0,0 +1,62 @@
++import { WORD_COUNT_DEFAULTS, ProjectType } from '../config/index.js';
++import type { WordCountStage } from './types.js';
++
++export function resolveChapterTarget(params: {
++  targetWordCount: number;
++  chapterCount: number;
++}): number {
++  const { targetWordCount, chapterCount } = params;
++  if (chapterCount <= 0) {
++    throw new Error('chapterCount must be greater than 0');
++  }
++  return Math.floor(targetWordCount / chapterCount);
++}
++
++export function resolveTolerance(stage: WordCountStage): number {
++  switch (stage) {
++    case 'writer':
++      return 0.05;
++    case 'review':
++      return 0.10;
++    case 'merge':
++      return 0.20;
++  }
++}
++
++export function resolveWordCountRange(params: {
++  targetWordCount: number;
++  chapterCount: number;
++  stage: WordCountStage;
++}): { min: number; max: number } {
++  const { targetWordCount, chapterCount, stage } = params;
++  const target = resolveChapterTarget({ targetWordCount, chapterCount });
++  const tolerance = resolveTolerance(stage);
++  return {
++    min: Math.floor(target * (1 - tolerance)),
++    max: Math.ceil(target * (1 + tolerance)),
++  };
++}
++
++export function formatToleranceForPrompt(stage: WordCountStage): string {
++  const tolerance = resolveTolerance(stage);
++  const percentage = Math.round(tolerance * 100);
++  return `±${percentage}%`;
++}
++
++export function clampToProjectType(params: {
++  range: { min: number; max: number };
++  projectType: ProjectType;
++}): { min: number; max: number } {
++  const { range, projectType } = params;
++  const defaults = WORD_COUNT_DEFAULTS[projectType];
++  if (!defaults) {
++    throw new Error(`Unknown projectType: ${projectType}`);
++  }
++
++  const { chapterMin, chapterMax } = defaults;
++
++  return {
++    min: Math.min(Math.max(range.min, chapterMin), chapterMax),
++    max: Math.min(Math.max(range.max, chapterMin), chapterMax),
++  };
++}
+diff --git a/packages/core/src/word-count-policy/types.ts b/packages/core/src/word-count-policy/types.ts
+new file mode 100644
+index 0000000..3183631
+--- /dev/null
++++ b/packages/core/src/word-count-policy/types.ts
+@@ -0,0 +1 @@
++export type WordCountStage = 'writer' | 'review' | 'merge';
+diff --git a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+index 0326a0d..2917f3f 100644
+--- a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+@@ -671,9 +671,9 @@ describe('RECONCILE — writer success (valid word count)', () => {
+ 
+     expect(vi.mocked(validateWordCount)).toHaveBeenCalledOnce();
+     const [, target] = vi.mocked(validateWordCount).mock.calls[0]!;
+-    // targetWordCount=90000, chapterCount=3 → 30000 per chapter, ±10%
+-    expect(target.min).toBe(27000);
+-    expect(target.max).toBe(33000);
++    // targetWordCount=90000, chapterCount=3 → 30000 per chapter, ±5% (writer stage)
++    expect(target.min).toBe(28500);
++    expect(target.max).toBe(31500);
+   });
+ 
+   it('enqueues REVIEW_CHAPTER when word count is valid', async () => {
+diff --git a/packages/lambdas/src/handlers/create-issues.ts b/packages/lambdas/src/handlers/create-issues.ts
+index 5f5668e..a87e321 100644
+--- a/packages/lambdas/src/handlers/create-issues.ts
++++ b/packages/lambdas/src/handlers/create-issues.ts
+@@ -4,6 +4,7 @@ import {
+   TaskGraphService,
+   createGitHubClient,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+ import { withSQSHandler } from '../shared/index.js';
+@@ -35,9 +36,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   const github = createGitHubClient(config.GITHUB_TOKEN, logger);
+   const repo = { owner: config.GITHUB_ORG, repo: project.repoName };
+ 
+-  const wordCountPerChapter = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountPerChapter = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   // Idempotency: skip if issues were already created for this task graph
+   const alreadyCreated = taskGraph.nodes.every((n) => n.issueNumber !== undefined);
+diff --git a/packages/lambdas/src/handlers/merge-chapter.ts b/packages/lambdas/src/handlers/merge-chapter.ts
+index 5159b6f..e21e758 100644
+--- a/packages/lambdas/src/handlers/merge-chapter.ts
++++ b/packages/lambdas/src/handlers/merge-chapter.ts
+@@ -7,13 +7,13 @@ import {
+   evaluateMergeReadiness,
+   validateWordCount,
+   enqueue,
++  resolveWordCountRange,
++  clampToProjectType,
+ } from '@auto-graph/core';
+ import type { PRReview, PRComment, WorkItem } from '@auto-graph/core';
+ import { withSQSHandler } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+-const WORD_COUNT_TOLERANCE = 0.2;
+-
+ function determineEditorialVerdict(
+   reviews: PRReview[],
+   prComments?: PRComment[],
+@@ -103,21 +103,23 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   const chapterContent = Buffer.from(chapterFile.content, 'base64').toString('utf-8');
+ 
+-  const perChapterTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
+-  const wordCountTarget = {
+-    min: Math.floor(perChapterTarget * (1 - WORD_COUNT_TOLERANCE)),
+-    max: Math.floor(perChapterTarget * (1 + WORD_COUNT_TOLERANCE)),
+-  };
++  const wordCountRange = resolveWordCountRange({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++    stage: 'merge',
++  });
++  const clampedRange = clampToProjectType({
++    range: wordCountRange,
++    projectType: project.config.projectType,
++  });
+ 
+-  const { wordCount } = validateWordCount(chapterContent, wordCountTarget);
++  const { wordCount } = validateWordCount(chapterContent, clampedRange);
+ 
+   const editorialVerdict = determineEditorialVerdict(reviews, prComments);
+ 
+   const readiness = evaluateMergeReadiness({
+     chapterContent,
+-    wordCountTarget,
++    wordCountTarget: clampedRange,
+     editorialVerdict,
+     continuityStatus: 'PENDING',
+   });
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 2bee27a..1fe370c 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -14,6 +14,7 @@ import {
+   enqueue,
+   validateWordCount,
+   validateListing,
++  resolveWordCountRange,
+ } from '@auto-graph/core';
+ import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
+ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+@@ -766,14 +767,12 @@ async function runReconcile(
+       );
+       const chapterText = Buffer.from(chapterFile.content, 'base64').toString('utf-8');
+ 
+-      const wordCountTarget = Math.floor(
+-        project.config.targetWordCount / project.config.chapterCount,
+-      );
+-      const tolerance = 0.1;
+-      const { valid, wordCount } = validateWordCount(chapterText, {
+-        min: Math.floor(wordCountTarget * (1 - tolerance)),
+-        max: Math.ceil(wordCountTarget * (1 + tolerance)),
++      const wordCountRange = resolveWordCountRange({
++        targetWordCount: project.config.targetWordCount,
++        chapterCount: project.config.chapterCount,
++        stage: 'writer',
+       });
++      const { valid, wordCount } = validateWordCount(chapterText, wordCountRange);
+ 
+       const MAX_WORD_COUNT_RETRIES = 3;
+ 
+diff --git a/packages/lambdas/src/handlers/review-chapter.ts b/packages/lambdas/src/handlers/review-chapter.ts
+index 464a44b..6fc6553 100644
+--- a/packages/lambdas/src/handlers/review-chapter.ts
++++ b/packages/lambdas/src/handlers/review-chapter.ts
+@@ -7,6 +7,7 @@ import {
+   createGitHubClient,
+   buildEditorPrompt,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+ import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+@@ -71,9 +72,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     }
+   }
+ 
+-  const wordCountTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountTarget = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   const systemPrompt = buildEditorPrompt({
+     chapterNumber: node.chapterNumber,
+diff --git a/packages/lambdas/src/handlers/revise-chapter.ts b/packages/lambdas/src/handlers/revise-chapter.ts
+index 32774a3..f5b528d 100644
+--- a/packages/lambdas/src/handlers/revise-chapter.ts
++++ b/packages/lambdas/src/handlers/revise-chapter.ts
+@@ -8,6 +8,7 @@ import {
+   createGitHubClient,
+   buildReviserPrompt,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+ import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+@@ -76,9 +77,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   const paddedChapter = String(node.chapterNumber).padStart(2, '0');
+   const branchName = `chapter-${paddedChapter}`;
+ 
+-  const wordCountTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountTarget = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   const systemPrompt = buildReviserPrompt({
+     reviewComments,
+diff --git a/packages/lambdas/src/handlers/trigger-chapter.ts b/packages/lambdas/src/handlers/trigger-chapter.ts
+index 2f787c0..74927df 100644
+--- a/packages/lambdas/src/handlers/trigger-chapter.ts
++++ b/packages/lambdas/src/handlers/trigger-chapter.ts
+@@ -8,6 +8,7 @@ import {
+   createGitHubClient,
+   buildWriterPrompt,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+ import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+@@ -81,9 +82,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     }
+   }
+ 
+-  const wordCountTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountTarget = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   const systemPrompt = buildWriterPrompt({
+     chapterNumber,

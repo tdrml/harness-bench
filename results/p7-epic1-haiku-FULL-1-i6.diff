@@ -1,0 +1,509 @@
+diff --git a/packages/cdk/src/__tests__/auto-graph-stack.test.ts b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+index 9a606da..557d065 100644
+--- a/packages/cdk/src/__tests__/auto-graph-stack.test.ts
++++ b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+@@ -186,8 +186,8 @@ describe('AutoGraphStack', () => {
+   });
+ 
+   describe('ECS Task Definitions', () => {
+-    it('creates exactly 9 Fargate task definitions', () => {
+-      template.resourceCountIs('AWS::ECS::TaskDefinition', 9);
++    it('creates exactly 10 Fargate task definitions', () => {
++      template.resourceCountIs('AWS::ECS::TaskDefinition', 10);
+     });
+ 
+     it('creates outliner task def with 2 vCPU / 8 GB', () => {
+diff --git a/packages/cdk/src/constructs/compute.ts b/packages/cdk/src/constructs/compute.ts
+index eea9df5..4de2608 100644
+--- a/packages/cdk/src/constructs/compute.ts
++++ b/packages/cdk/src/constructs/compute.ts
+@@ -34,6 +34,7 @@ const TASK_CONFIGS: TaskConfig[] = [
+   { name: 'auditor', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 120 },
+   { name: 'fixer', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 60 },
+   { name: 'packager', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 30 },
++  { name: 'marketer', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 15 },
+ ];
+ 
+ function toPascalCase(str: string): string {
+diff --git a/packages/core/src/dynamodb/types.ts b/packages/core/src/dynamodb/types.ts
+index 99ec486..ff913dd 100644
+--- a/packages/core/src/dynamodb/types.ts
++++ b/packages/core/src/dynamodb/types.ts
+@@ -11,6 +11,8 @@ export type ProjectStatus =
+   | 'WRITING'
+   | 'REVIEWING'
+   | 'PACKAGING'
++  | 'RELEASING'
++  | 'RELEASED'
+   | 'COMPLETE'
+   | 'FAILED';
+ 
+@@ -79,7 +81,8 @@ export type WorkerType =
+   | 'continuity-checker'
+   | 'auditor'
+   | 'fixer'
+-  | 'packager';
++  | 'packager'
++  | 'marketer';
+ 
+ export type AgentRunStatus =
+   | 'PENDING'
+diff --git a/packages/core/src/prompts/index.ts b/packages/core/src/prompts/index.ts
+index 8dbc60e..60a3751 100644
+--- a/packages/core/src/prompts/index.ts
++++ b/packages/core/src/prompts/index.ts
+@@ -25,4 +25,7 @@ export type { ContinuityFixerPromptParams } from './continuity-fixer.js';
+ export { buildPackagerPrompt } from './packager.js';
+ export type { PackagerPromptParams } from './packager.js';
+ 
++export { buildMarketerPrompt } from './marketer.js';
++export type { MarketerPromptParams } from './marketer.js';
++
+ export { buildSharedPreamble, GUARD_RAILS, CLI_INSTRUCTIONS, REPO_CONVENTIONS } from './shared.js';
+diff --git a/packages/core/src/prompts/marketer.ts b/packages/core/src/prompts/marketer.ts
+new file mode 100644
+index 0000000..d9ebb8c
+--- /dev/null
++++ b/packages/core/src/prompts/marketer.ts
+@@ -0,0 +1,85 @@
++import { ProjectType } from '../config/schemas.js';
++import { buildSharedPreamble } from './shared.js';
++
++export interface MarketerPromptParams {
++  title: string;
++  repoName: string;
++  genre: string;
++  projectType?: ProjectType | undefined;
++}
++
++export function buildMarketerPrompt(params: MarketerPromptParams): string {
++  const { title, repoName, genre, projectType } = params;
++
++  return `# Marketer Agent — System Prompt
++
++You are the Marketer agent. Your responsibility is to write a store listing for the published work, including marketing copy (blurb), keywords, and categories for distribution platforms.
++
++${buildSharedPreamble()}
++
++## Context
++
++- **Repository**: ${repoName}
++- **Book title**: ${title}
++- **Genre**: ${genre}
++- **Project type**: ${projectType ?? 'NOVEL'}
++- **Source**: The complete manuscript is available on the \`main\` branch at \`manuscript/manuscript.md\`. The release manifest is at \`release/manifest.json\`.
++
++## Your Task
++
++### Phase 1 — Read Source Materials
++
++1. Read \`release/manifest.json\` to understand the book structure and word count
++2. Read \`manuscript/manuscript.md\` to understand the content and tone
++
++### Phase 2 — Create Store Listing
++
++Create \`release/listing.json\` with the following structure:
++
++\`\`\`json
++{
++  "title": "Book Title",
++  "subtitle": "Optional subtitle or tagline",
++  "blurb": "Marketing description (HTML allowed, max 4000 characters)",
++  "author": "Author Name",
++  "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5", "keyword6", "keyword7"],
++  "categories": ["category1", "category2", "category3"]
++}
++\`\`\`
++
++### Phase 3 — Guidelines
++
++- **Title and Subtitle**: Compelling and marketable
++- **Blurb**: Engaging marketing copy that hooks readers. Use exactly 7 keywords and exactly 3 categories as shown above.
++- **Keywords**: Exactly 7 relevant keywords for searchability
++- **Categories**: Exactly 3 applicable categories for the bookstore
++- **HTML in Blurb**: You may use these tags: b, i, u, br, p, ul, li, ol, h4, h5, h6
++- **No Placeholders**: All fields must be complete with no "TODO:" placeholders
++
++### Phase 4 — Commit and Push
++
++\`\`\`
++git add release/listing.json
++git commit -m "create store listing"
++git push
++\`\`\`
++
++### Phase 5 — Verify
++
++Before finishing, confirm:
++
++- \`release/listing.json\` is valid JSON
++- Title and subtitle are compelling
++- Blurb is engaging and appropriate for the genre
++- Keywords count is exactly 7
++- Categories count is exactly 3
++- All fields contain actual content (no TODO: placeholders)
++- The file has been committed and pushed
++
++## Important Guidelines
++
++- The listing is final and ready for publication; treat it as a professional marketing document.
++- Keywords and categories are critical for discoverability on store platforms.
++- Ensure all fields are complete and polished for public distribution.
++`;
++}
+diff --git a/packages/core/src/queue/schemas.ts b/packages/core/src/queue/schemas.ts
+index 7e6cd28..e0d74e5 100644
+--- a/packages/core/src/queue/schemas.ts
++++ b/packages/core/src/queue/schemas.ts
+@@ -100,6 +100,12 @@ export const PackageManuscriptSchema = z.object({
+   runId: z.string().optional(),
+ });
+ 
++export const GenerateListingSchema = z.object({
++  type: z.literal('GENERATE_LISTING'),
++  projectId: z.string().min(1),
++  runId: z.string().optional(),
++});
++
+ export const WorkItemSchema = z.discriminatedUnion('type', [
+   BootstrapProjectSchema,
+   BootstrapRepoSchema,
+@@ -118,4 +124,5 @@ export const WorkItemSchema = z.discriminatedUnion('type', [
+   ReconcileSweepSchema,
+   FinalReviewSchema,
+   PackageManuscriptSchema,
++  GenerateListingSchema,
+ ]);
+diff --git a/packages/core/src/queue/types.ts b/packages/core/src/queue/types.ts
+index 76aca12..9c41656 100644
+--- a/packages/core/src/queue/types.ts
++++ b/packages/core/src/queue/types.ts
+@@ -17,6 +17,7 @@ import type {
+   ReconcileSweepSchema,
+   FinalReviewSchema,
+   PackageManuscriptSchema,
++  GenerateListingSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+@@ -37,5 +38,6 @@ export type TriggerNextChapterItem = z.infer<typeof TriggerNextChapterSchema>;
+ export type ReconcileSweepItem = z.infer<typeof ReconcileSweepSchema>;
+ export type FinalReviewItem = z.infer<typeof FinalReviewSchema>;
+ export type PackageManuscriptItem = z.infer<typeof PackageManuscriptSchema>;
++export type GenerateListingItem = z.infer<typeof GenerateListingSchema>;
+ 
+ export type WorkItem = z.infer<typeof WorkItemSchema>;
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+index 118d80d..fb95db4 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+@@ -19,6 +19,7 @@ import { handler as continuityAuditHandler } from '../../../handlers/continuity-
+ import { handler as continuityFixerHandler } from '../../../handlers/continuity-fixer.js';
+ import { handler as finalReviewHandler } from '../../../handlers/final-review.js';
+ import { handler as packageManuscriptHandler } from '../../../handlers/package-manuscript.js';
++import { handler as generateListingHandler } from '../../../handlers/generate-listing.js';
+ import { handler as reconcileEnqueuerHandler } from '../../../handlers/reconcile-enqueuer.js';
+ 
+ type SQSHandlerFn = (event: SQSEvent, context: never, callback: () => void) => void | Promise<unknown>;
+@@ -40,6 +41,7 @@ const HANDLER_MAP: Record<string, SQSHandlerFn> = {
+   CONTINUITY_FIX: continuityFixerHandler,
+   FINAL_REVIEW: finalReviewHandler,
+   PACKAGE_MANUSCRIPT: packageManuscriptHandler,
++  GENERATE_LISTING: generateListingHandler,
+ };
+ 
+ let _msgCounter = 0;
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/test-data.ts b/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
+index 18dcd2c..2775120 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
+@@ -100,6 +100,16 @@ export const THREE_INDEPENDENT_CHAPTERS_TASK_GRAPH_JSON = JSON.stringify({
+   batches: [{ batchId: 'batch-1', chapterIds: ['chapter-01', 'chapter-02', 'chapter-03'], prerequisiteBatches: [] }],
+ });
+ 
++/** Valid KDP listing JSON for testing marketer validation. */
++export const MOCK_LISTING_JSON = JSON.stringify({
++  title: 'The Test Novel',
++  subtitle: 'A Journey of Darkness',
++  blurb: 'A gripping fantasy tale where a hero embarks on a perilous journey to save the world from ancient darkness.',
++  author: 'Jordan Vale',
++  keywords: ['fantasy', 'adventure', 'hero', 'quest', 'darkness', 'magic', 'epic'],
++  categories: ['Fantasy', 'Adventure', 'Magic'],
++});
++
+ /** Base environment variables required by all Lambda handlers. */
+ export const BASE_ENV: Record<string, string> = {
+   AWS_REGION: 'us-east-1',
+@@ -123,6 +133,10 @@ export const BASE_ENV: Record<string, string> = {
+     'arn:aws:ecs:us-east-1:123456789:task-definition/auditor:1',
+   FIXER_TASK_DEF_ARN:
+     'arn:aws:ecs:us-east-1:123456789:task-definition/fixer:1',
++  PACKAGER_TASK_DEF_ARN:
++    'arn:aws:ecs:us-east-1:123456789:task-definition/packager:1',
++  MARKETER_TASK_DEF_ARN:
++    'arn:aws:ecs:us-east-1:123456789:task-definition/marketer:1',
+ };
+ 
+ /** Fake ECS task ARN returned by the mocked launchECSTask. */
+diff --git a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+index 42febd6..42faab2 100644
+--- a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
++++ b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+@@ -63,6 +63,7 @@ import {
+   MOCK_CHAPTER_CONTENT,
+   SINGLE_CHAPTER_TASK_GRAPH_JSON,
+   MOCK_CONTINUITY_STATE,
++  MOCK_LISTING_JSON,
+   BASE_ENV,
+ } from './helpers/test-data.js';
+ import { runAll, dispatch } from './helpers/pipeline-runner.js';
+@@ -87,6 +88,7 @@ beforeEach(() => {
+   fileContents.set('notes/task-graph.json', SINGLE_CHAPTER_TASK_GRAPH_JSON);
+   fileContents.set('manuscript/chapter-01.md', MOCK_CHAPTER_CONTENT);
+   fileContents.set('notes/continuity-state.json', MOCK_CONTINUITY_STATE);
++  fileContents.set('release/listing.json', MOCK_LISTING_JSON);
+ });
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/packages/lambdas/src/handlers/dispatcher.ts b/packages/lambdas/src/handlers/dispatcher.ts
+index 1c21d20..f1da413 100644
+--- a/packages/lambdas/src/handlers/dispatcher.ts
++++ b/packages/lambdas/src/handlers/dispatcher.ts
+@@ -18,6 +18,7 @@ import { handle as handleContinuityAudit } from './continuity-audit.js';
+ import { handle as handleContinuityFix } from './continuity-fixer.js';
+ import { handle as handleFinalReview } from './final-review.js';
+ import { handle as handlePackageManuscript } from './package-manuscript.js';
++import { handle as handleGenerateListing } from './generate-listing.js';
+ 
+ type HandlerFn = (workItem: WorkItem, context: HandlerContext) => Promise<void>;
+ 
+@@ -38,6 +39,7 @@ const handlers: Record<string, HandlerFn> = {
+   CONTINUITY_FIX: handleContinuityFix,
+   FINAL_REVIEW: handleFinalReview,
+   PACKAGE_MANUSCRIPT: handlePackageManuscript,
++  GENERATE_LISTING: handleGenerateListing,
+ };
+ 
+ const sqsHandler = withSQSHandler(async (workItem, context) => {
+diff --git a/packages/lambdas/src/handlers/generate-listing.ts b/packages/lambdas/src/handlers/generate-listing.ts
+new file mode 100644
+index 0000000..50acfda
+--- /dev/null
++++ b/packages/lambdas/src/handlers/generate-listing.ts
+@@ -0,0 +1,66 @@
++import {
++  createDynamoClient,
++  ProjectService,
++  AgentRunService,
++  TaskOutputService,
++  buildMarketerPrompt,
++  enqueue,
++} from '@auto-graph/core';
++import type { WorkItem } from '@auto-graph/core';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
++import type { HandlerContext } from '../shared/index.js';
++
++export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
++  const { logger, config } = context;
++
++  if (workItem.type !== 'GENERATE_LISTING') {
++    throw new Error(`Unexpected work item type: ${workItem.type}`);
++  }
++
++  const { projectId } = workItem;
++
++  const marketerTaskDefArn = process.env['MARKETER_TASK_DEF_ARN'];
++  if (!marketerTaskDefArn) {
++    throw new Error('MARKETER_TASK_DEF_ARN environment variable is not set');
++  }
++
++  const dynamoClient = createDynamoClient(config.AWS_REGION);
++  const projectService = new ProjectService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const agentRunService = new AgentRunService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const taskOutputService = new TaskOutputService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++
++  const project = await projectService.get(projectId);
++  if (!project) {
++    throw new Error(`Project not found: ${projectId}`);
++  }
++
++  const systemPrompt = buildMarketerPrompt({
++    title: project.config.title,
++    repoName: project.repoName,
++    genre: project.config.genre ?? '',
++    projectType: project.config.projectType,
++  });
++
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: marketerTaskDefArn,
++    workerType: 'marketer',
++    systemPrompt,
++    projectId,
++    repoName: project.repoName,
++    config,
++    agentRunService,
++    taskOutputService,
++  });
++
++  await projectService.updateStatus(projectId, 'RELEASING');
++
++  await enqueue(config.SQS_QUEUE_URL, {
++    type: 'RECONCILE',
++    projectId,
++    runId,
++  });
++
++  logger.info('Generate listing launched', { projectId, runId, taskArn });
++}
++
++export const handler = withSQSHandler(handle);
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 40665d6..6e577a2 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -13,6 +13,7 @@ import {
+   createGitHubClient,
+   enqueue,
+   validateWordCount,
++  validateListing,
+ } from '@auto-graph/core';
+ import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
+ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+@@ -188,6 +189,14 @@ async function reEnqueueForRetry(
+       );
+       return true;
+     }
++    case 'marketer': {
++      await enqueueReaction(
++        queueUrlPrefix,
++        { type: 'GENERATE_LISTING', projectId },
++        sourceRunId,
++      );
++      return true;
++    }
+     default:
+       return false;
+   }
+@@ -637,6 +646,13 @@ async function runReconcile(
+               runId,
+             );
+             reEnqueued = true;
++          } else if (agentRun.workerType === 'marketer') {
++            await enqueueReaction(
++              config.SQS_QUEUE_URL,
++              { type: 'GENERATE_LISTING', projectId },
++              runId,
++            );
++            reEnqueued = true;
+           }
+           // Note: auditor and fixer failures are handled above with explicit
+           // GitHub-issue creation and feed-forward to FINAL_REVIEW; they are
+@@ -1055,19 +1071,78 @@ async function runReconcile(
+ 
+     case 'packager': {
+       // Packager completed the manuscript assembly and manifest creation.
+-      // Proceed to final review.
++      // Proceed to listing generation.
+       await enqueueReaction(
+         config.SQS_QUEUE_URL,
+-        { type: 'FINAL_REVIEW', projectId },
++        { type: 'GENERATE_LISTING', projectId },
+         runId,
+       );
+ 
+-      logger.info('Packager succeeded, enqueued FINAL_REVIEW', {
++      logger.info('Packager succeeded, enqueued GENERATE_LISTING', {
+         projectId,
+         runId,
+       });
+       break;
+     }
++
++    case 'marketer': {
++      // Read and validate the listing JSON from the repo
++      let listingContent: string;
++      try {
++        const listingFile = await github.getFileContent(
++          repo,
++          'release/listing.json',
++          'main',
++        );
++        listingContent = Buffer.from(listingFile.content, 'base64').toString('utf-8');
++      } catch (err) {
++        await projectService.updateStatus(projectId, 'FAILED');
++        logger.error('Marketer listing file not found or unreadable', {
++          projectId,
++          runId,
++          error: err instanceof Error ? err.message : String(err),
++        });
++        break;
++      }
++
++      let listingJson: unknown;
++      try {
++        listingJson = JSON.parse(listingContent);
++      } catch (err) {
++        await projectService.updateStatus(projectId, 'FAILED');
++        logger.error('Marketer listing JSON parse failed', {
++          projectId,
++          runId,
++          error: err instanceof Error ? err.message : String(err),
++        });
++        break;
++      }
++
++      const validation = validateListing(listingJson as never);
++
++      if (validation.valid) {
++        await projectService.updateStatus(projectId, 'RELEASED');
++
++        await enqueueReaction(
++          config.SQS_QUEUE_URL,
++          { type: 'FINAL_REVIEW', projectId },
++          runId,
++        );
++
++        logger.info('Marketer succeeded, listing validated, enqueued FINAL_REVIEW', {
++          projectId,
++          runId,
++        });
++      } else {
++        await projectService.updateStatus(projectId, 'FAILED');
++        logger.error('Marketer listing validation failed', {
++          projectId,
++          runId,
++          errors: validation.errors,
++        });
++      }
++      break;
++    }
+   }
+ 
+   logger.info('Reconcile complete', {
+diff --git a/packages/worker/src/entrypoint.ts b/packages/worker/src/entrypoint.ts
+index 56d0280..aa30ecc 100644
+--- a/packages/worker/src/entrypoint.ts
++++ b/packages/worker/src/entrypoint.ts
+@@ -78,6 +78,7 @@ export async function loadWorker(workerType: string): Promise<WorkerModule> {
+     auditor: () => import('./workers/auditor.js') as Promise<WorkerModule>,
+     fixer: () => import('./workers/continuity-fixer.js') as Promise<WorkerModule>,
+     packager: () => import('./workers/packager.js') as Promise<WorkerModule>,
++    marketer: () => import('./workers/marketer.js') as Promise<WorkerModule>,
+   };
+ 
+   const loader = loaders[workerType];
+diff --git a/packages/worker/src/workers/marketer.ts b/packages/worker/src/workers/marketer.ts
+new file mode 100644
+index 0000000..15ee892
+--- /dev/null
++++ b/packages/worker/src/workers/marketer.ts
+@@ -0,0 +1,9 @@
++import type { WorkerEnv } from '../types.js';
++
++export async function prepare(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // Marketer works on main branch; no branch setup required
++}
++
++export async function finalize(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // The marketer commits and pushes directly to main — no post-processing needed
++}

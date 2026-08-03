@@ -1,0 +1,106 @@
+diff --git a/packages/core/src/dynamodb/types.ts b/packages/core/src/dynamodb/types.ts
+index 0c391e4..99ec486 100644
+--- a/packages/core/src/dynamodb/types.ts
++++ b/packages/core/src/dynamodb/types.ts
+@@ -10,6 +10,7 @@ export type ProjectStatus =
+   | 'PLANNING'
+   | 'WRITING'
+   | 'REVIEWING'
++  | 'PACKAGING'
+   | 'COMPLETE'
+   | 'FAILED';
+ 
+@@ -77,7 +78,8 @@ export type WorkerType =
+   | 'reviser'
+   | 'continuity-checker'
+   | 'auditor'
+-  | 'fixer';
++  | 'fixer'
++  | 'packager';
+ 
+ export type AgentRunStatus =
+   | 'PENDING'
+diff --git a/packages/core/src/queue/__tests__/queue.test.ts b/packages/core/src/queue/__tests__/queue.test.ts
+index 06fc9e1..0160d98 100644
+--- a/packages/core/src/queue/__tests__/queue.test.ts
++++ b/packages/core/src/queue/__tests__/queue.test.ts
+@@ -47,6 +47,17 @@ describe('parseWorkItem', () => {
+     expect(result).toEqual(item);
+   });
+ 
++  it('parses a valid PACKAGE_MANUSCRIPT message', () => {
++    const item: WorkItem = { type: 'PACKAGE_MANUSCRIPT', projectId: 'proj-3', runId: 'run-1' };
++    const result = parseWorkItem(JSON.stringify(item));
++    expect(result).toEqual(item);
++  });
++
++  it('throws for PACKAGE_MANUSCRIPT missing projectId', () => {
++    const body = JSON.stringify({ type: 'PACKAGE_MANUSCRIPT' });
++    expect(() => parseWorkItem(body)).toThrow('Invalid work item');
++  });
++
+   it('throws for non-JSON input', () => {
+     expect(() => parseWorkItem('not json')).toThrow(
+       'Failed to parse work item: body is not valid JSON',
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index f291e73..a4df96e 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -14,6 +14,7 @@ export type {
+   TriggerNextChapterItem,
+   ReconcileSweepItem,
+   FinalReviewItem,
++  PackageManuscriptItem,
+   WorkItem,
+ } from './types.js';
+ 
+@@ -33,6 +34,7 @@ export {
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+diff --git a/packages/core/src/queue/schemas.ts b/packages/core/src/queue/schemas.ts
+index 6b43fb3..fae651f 100644
+--- a/packages/core/src/queue/schemas.ts
++++ b/packages/core/src/queue/schemas.ts
+@@ -94,6 +94,12 @@ export const FinalReviewSchema = z.object({
+   projectId: z.string().min(1),
+ });
+ 
++export const PackageManuscriptSchema = z.object({
++  type: z.literal('PACKAGE_MANUSCRIPT'),
++  projectId: z.string().min(1),
++  runId: z.string().min(1).optional(),
++});
++
+ export const WorkItemSchema = z.discriminatedUnion('type', [
+   BootstrapProjectSchema,
+   BootstrapRepoSchema,
+@@ -111,4 +117,5 @@ export const WorkItemSchema = z.discriminatedUnion('type', [
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
+ ]);
+diff --git a/packages/core/src/queue/types.ts b/packages/core/src/queue/types.ts
+index a0da274..76aca12 100644
+--- a/packages/core/src/queue/types.ts
++++ b/packages/core/src/queue/types.ts
+@@ -16,6 +16,7 @@ import type {
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+@@ -35,5 +36,6 @@ export type ContinuityFixItem = z.infer<typeof ContinuityFixSchema>;
+ export type TriggerNextChapterItem = z.infer<typeof TriggerNextChapterSchema>;
+ export type ReconcileSweepItem = z.infer<typeof ReconcileSweepSchema>;
+ export type FinalReviewItem = z.infer<typeof FinalReviewSchema>;
++export type PackageManuscriptItem = z.infer<typeof PackageManuscriptSchema>;
+ 
+ export type WorkItem = z.infer<typeof WorkItemSchema>;

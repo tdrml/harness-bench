@@ -1,0 +1,821 @@
+diff --git a/packages/cdk/src/__tests__/auto-graph-stack.test.ts b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+index 9a606da..1d7b1e4 100644
+--- a/packages/cdk/src/__tests__/auto-graph-stack.test.ts
++++ b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+@@ -186,8 +186,8 @@ describe('AutoGraphStack', () => {
+   });
+ 
+   describe('ECS Task Definitions', () => {
+-    it('creates exactly 9 Fargate task definitions', () => {
+-      template.resourceCountIs('AWS::ECS::TaskDefinition', 9);
++    it('creates exactly 10 Fargate task definitions', () => {
++      template.resourceCountIs('AWS::ECS::TaskDefinition', 10);
+     });
+ 
+     it('creates outliner task def with 2 vCPU / 8 GB', () => {
+@@ -271,6 +271,15 @@ describe('AutoGraphStack', () => {
+         RequiresCompatibilities: ['FARGATE'],
+       });
+     });
++
++    it('creates marketer task def with 2 vCPU / 8 GB', () => {
++      template.hasResourceProperties('AWS::ECS::TaskDefinition', {
++        Family: 'test-marketer',
++        Cpu: '2048',
++        Memory: '8192',
++        RequiresCompatibilities: ['FARGATE'],
++      });
++    });
+   });
+ 
+   describe('Lambda functions', () => {
+diff --git a/packages/cdk/src/constructs/compute.ts b/packages/cdk/src/constructs/compute.ts
+index eea9df5..4de2608 100644
+--- a/packages/cdk/src/constructs/compute.ts
++++ b/packages/cdk/src/constructs/compute.ts
+@@ -34,6 +34,7 @@ const TASK_CONFIGS: TaskConfig[] = [
+   { name: 'auditor', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 120 },
+   { name: 'fixer', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 60 },
+   { name: 'packager', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 30 },
++  { name: 'marketer', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 15 },
+ ];
+ 
+ function toPascalCase(str: string): string {
+diff --git a/packages/core/src/dynamodb/types.ts b/packages/core/src/dynamodb/types.ts
+index 99ec486..ff913dd 100644
+--- a/packages/core/src/dynamodb/types.ts
++++ b/packages/core/src/dynamodb/types.ts
+@@ -11,6 +11,8 @@ export type ProjectStatus =
+   | 'WRITING'
+   | 'REVIEWING'
+   | 'PACKAGING'
++  | 'RELEASING'
++  | 'RELEASED'
+   | 'COMPLETE'
+   | 'FAILED';
+ 
+@@ -79,7 +81,8 @@ export type WorkerType =
+   | 'continuity-checker'
+   | 'auditor'
+   | 'fixer'
+-  | 'packager';
++  | 'packager'
++  | 'marketer';
+ 
+ export type AgentRunStatus =
+   | 'PENDING'
+diff --git a/packages/core/src/prompts/index.ts b/packages/core/src/prompts/index.ts
+index 8dbc60e..60a3751 100644
+--- a/packages/core/src/prompts/index.ts
++++ b/packages/core/src/prompts/index.ts
+@@ -25,4 +25,7 @@ export type { ContinuityFixerPromptParams } from './continuity-fixer.js';
+ export { buildPackagerPrompt } from './packager.js';
+ export type { PackagerPromptParams } from './packager.js';
+ 
++export { buildMarketerPrompt } from './marketer.js';
++export type { MarketerPromptParams } from './marketer.js';
++
+ export { buildSharedPreamble, GUARD_RAILS, CLI_INSTRUCTIONS, REPO_CONVENTIONS } from './shared.js';
+diff --git a/packages/core/src/prompts/marketer.ts b/packages/core/src/prompts/marketer.ts
+new file mode 100644
+index 0000000..612984e
+--- /dev/null
++++ b/packages/core/src/prompts/marketer.ts
+@@ -0,0 +1,72 @@
++import { ProjectType } from '../config/schemas.js';
++import { buildSharedPreamble } from './shared.js';
++
++export interface MarketerPromptParams {
++  title: string;
++  repoName: string;
++  genre: string;
++  projectType?: ProjectType | undefined;
++}
++
++function buildFictionListingNotes(): string {
++  return `Write blurb copy that sells the story on its narrative hook, tone, and stakes — the way a back-cover blurb for this genre would read. Do not summarize the plot beat by beat.`;
++}
++
++function buildNonFictionListingNotes(): string {
++  return `Write blurb copy that sells the book on the value and insight it delivers to the reader. Do not summarize the chapters beat by beat.`;
++}
++
++export function buildMarketerPrompt(params: MarketerPromptParams): string {
++  const { title, repoName, genre, projectType } = params;
++  const isNonFiction = projectType === ProjectType.NON_FICTION;
++
++  const listingNotes = isNonFiction ? buildNonFictionListingNotes() : buildFictionListingNotes();
++
++  const roleIntro = `You are the Marketer agent for the project **"${title}"**. The manuscript has been assembled and packaged for release — your job is to write the Amazon KDP store listing so the book is ready to publish.`;
++
++  return `# Marketer Agent — System Prompt
++
++${roleIntro}
++
++${buildSharedPreamble()}
++
++## Context
++
++- **Repository**: ${repoName}
++- **Genre**: ${genre}
++- **Source**: the finished manuscript is at \`manuscript/manuscript.md\` and the release manifest is at \`release/manifest.json\`.
++
++## Your Task
++
++${listingNotes}
++
++### Write \`release/listing.json\`
++
++Create \`release/listing.json\` describing the store listing. Include exactly these fields:
++
++\`\`\`json
++{
++  "title": "${title}",
++  "subtitle": "...",
++  "blurb": "...",
++  "keywords": ["...", "...", "...", "...", "...", "...", "..."],
++  "categories": ["...", "...", "..."],
++  "author": "..."
++}
++\`\`\`
++
++- \`keywords\` must contain **exactly 7** entries — the search terms a reader would use to find this book on Amazon.
++- \`categories\` must contain **exactly 3** entries — Amazon KDP browse categories appropriate for this genre.
++- \`subtitle\` is optional; omit the field entirely if the title stands on its own.
++- \`blurb\` is plain text or the limited HTML KDP allows for descriptions (\`<b>\`, \`<i>\`, \`<u>\`, \`<br>\`, \`<p>\`, \`<ul>\`, \`<li>\`, \`<ol>\`, \`<h4>\`, \`<h5>\`, \`<h6>\`) — no other tags.
++
++### Commit and Push
++
++\`\`\`
++git add release/listing.json
++git commit -m "add store listing for release"
++git push
++\`\`\`
++
++Do not create or modify any other files. \`release/listing.json\` is the only path this run may write to, in addition to the shared conventions above.`;
++}
+diff --git a/packages/core/src/queue/__tests__/queue.test.ts b/packages/core/src/queue/__tests__/queue.test.ts
+index b8f5f22..3dd7952 100644
+--- a/packages/core/src/queue/__tests__/queue.test.ts
++++ b/packages/core/src/queue/__tests__/queue.test.ts
+@@ -75,7 +75,7 @@ describe('parseWorkItem', () => {
+     expect(message).toContain('nodeId');
+   });
+ 
+-  it('parses all 15 work-item types without error', () => {
++  it('parses all 16 work-item types without error', () => {
+     const items: WorkItem[] = [
+       { type: 'BOOTSTRAP_PROJECT', projectId: 'p', issueNumber: 1, issueBody: 'body' },
+       { type: 'BOOTSTRAP_REPO', projectId: 'p', issueNumber: 1 },
+@@ -99,6 +99,7 @@ describe('parseWorkItem', () => {
+       { type: 'RECONCILE_SWEEP' },
+       { type: 'FINAL_REVIEW', projectId: 'p' },
+       { type: 'PACKAGE_MANUSCRIPT', projectId: 'p' },
++      { type: 'GENERATE_LISTING', projectId: 'p' },
+     ];
+ 
+     for (const item of items) {
+@@ -116,6 +117,17 @@ describe('parseWorkItem', () => {
+     const body = JSON.stringify({ type: 'PACKAGE_MANUSCRIPT' });
+     expect(() => parseWorkItem(body)).toThrow('Invalid work item');
+   });
++
++  it('parses a valid GENERATE_LISTING message with optional runId', () => {
++    const item: WorkItem = { type: 'GENERATE_LISTING', projectId: 'p', runId: 'r' };
++    const result = parseWorkItem(JSON.stringify(item));
++    expect(result).toEqual(item);
++  });
++
++  it('throws for GENERATE_LISTING missing projectId', () => {
++    const body = JSON.stringify({ type: 'GENERATE_LISTING' });
++    expect(() => parseWorkItem(body)).toThrow('Invalid work item');
++  });
+ });
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index a4df96e..8516a13 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -15,6 +15,7 @@ export type {
+   ReconcileSweepItem,
+   FinalReviewItem,
+   PackageManuscriptItem,
++  GenerateListingItem,
+   WorkItem,
+ } from './types.js';
+ 
+@@ -35,6 +36,7 @@ export {
+   ReconcileSweepSchema,
+   FinalReviewSchema,
+   PackageManuscriptSchema,
++  GenerateListingSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+diff --git a/packages/core/src/queue/schemas.ts b/packages/core/src/queue/schemas.ts
+index 7e6cd28..e0d74e5 100644
+--- a/packages/core/src/queue/schemas.ts
++++ b/packages/core/src/queue/schemas.ts
+@@ -100,6 +100,12 @@ export const PackageManuscriptSchema = z.object({
+   runId: z.string().optional(),
+ });
+ 
++export const GenerateListingSchema = z.object({
++  type: z.literal('GENERATE_LISTING'),
++  projectId: z.string().min(1),
++  runId: z.string().optional(),
++});
++
+ export const WorkItemSchema = z.discriminatedUnion('type', [
+   BootstrapProjectSchema,
+   BootstrapRepoSchema,
+@@ -118,4 +124,5 @@ export const WorkItemSchema = z.discriminatedUnion('type', [
+   ReconcileSweepSchema,
+   FinalReviewSchema,
+   PackageManuscriptSchema,
++  GenerateListingSchema,
+ ]);
+diff --git a/packages/core/src/queue/types.ts b/packages/core/src/queue/types.ts
+index 76aca12..9c41656 100644
+--- a/packages/core/src/queue/types.ts
++++ b/packages/core/src/queue/types.ts
+@@ -17,6 +17,7 @@ import type {
+   ReconcileSweepSchema,
+   FinalReviewSchema,
+   PackageManuscriptSchema,
++  GenerateListingSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+@@ -37,5 +38,6 @@ export type TriggerNextChapterItem = z.infer<typeof TriggerNextChapterSchema>;
+ export type ReconcileSweepItem = z.infer<typeof ReconcileSweepSchema>;
+ export type FinalReviewItem = z.infer<typeof FinalReviewSchema>;
+ export type PackageManuscriptItem = z.infer<typeof PackageManuscriptSchema>;
++export type GenerateListingItem = z.infer<typeof GenerateListingSchema>;
+ 
+ export type WorkItem = z.infer<typeof WorkItemSchema>;
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+index 118d80d..fb95db4 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+@@ -19,6 +19,7 @@ import { handler as continuityAuditHandler } from '../../../handlers/continuity-
+ import { handler as continuityFixerHandler } from '../../../handlers/continuity-fixer.js';
+ import { handler as finalReviewHandler } from '../../../handlers/final-review.js';
+ import { handler as packageManuscriptHandler } from '../../../handlers/package-manuscript.js';
++import { handler as generateListingHandler } from '../../../handlers/generate-listing.js';
+ import { handler as reconcileEnqueuerHandler } from '../../../handlers/reconcile-enqueuer.js';
+ 
+ type SQSHandlerFn = (event: SQSEvent, context: never, callback: () => void) => void | Promise<unknown>;
+@@ -40,6 +41,7 @@ const HANDLER_MAP: Record<string, SQSHandlerFn> = {
+   CONTINUITY_FIX: continuityFixerHandler,
+   FINAL_REVIEW: finalReviewHandler,
+   PACKAGE_MANUSCRIPT: packageManuscriptHandler,
++  GENERATE_LISTING: generateListingHandler,
+ };
+ 
+ let _msgCounter = 0;
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/test-data.ts b/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
+index 9b101f5..32c84eb 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
+@@ -125,6 +125,8 @@ export const BASE_ENV: Record<string, string> = {
+     'arn:aws:ecs:us-east-1:123456789:task-definition/fixer:1',
+   PACKAGER_TASK_DEF_ARN:
+     'arn:aws:ecs:us-east-1:123456789:task-definition/packager:1',
++  MARKETER_TASK_DEF_ARN:
++    'arn:aws:ecs:us-east-1:123456789:task-definition/marketer:1',
+ };
+ 
+ /** Fake ECS task ARN returned by the mocked launchECSTask. */
+diff --git a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+index 08381d6..bfdf19b 100644
+--- a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
++++ b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+@@ -86,6 +86,13 @@ beforeEach(() => {
+   fileContents.set('notes/task-graph.json', SINGLE_CHAPTER_TASK_GRAPH_JSON);
+   fileContents.set('manuscript/chapter-01.md', MOCK_CHAPTER_CONTENT);
+   fileContents.set('notes/continuity-state.json', MOCK_CONTINUITY_STATE);
++  fileContents.set('release/listing.json', JSON.stringify({
++    title: 'The Test Novel',
++    blurb: 'A gripping tale of adventure and discovery in a world unlike our own.',
++    keywords: ['fantasy', 'adventure', 'magic', 'quest', 'epic', 'hero', 'journey'],
++    categories: ['Fantasy', 'Adventure', 'Fiction'],
++    author: 'Test Author',
++  }));
+ });
+ 
+ // ---------------------------------------------------------------------------
+@@ -130,7 +137,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+     expect(project!.repoUrl).toBe('https://github.com/test-org/the-test-novel');
+   });
+ 
+-  it('runs the full pipeline end-to-end through CONTINUITY_AUDIT to FINAL_REVIEW', async () => {
++  it('runs the full pipeline end-to-end through CONTINUITY_AUDIT to GENERATE_LISTING', async () => {
+     // Kick off from BOOTSTRAP_PROJECT
+     pendingQueue.push({
+       type: 'BOOTSTRAP_PROJECT',
+@@ -144,17 +151,19 @@ describe('Full pipeline flow (1-chapter project)', () => {
+     // Verify final pipeline output
+     expect(pendingQueue).toHaveLength(0);
+ 
+-    // Check that CONTINUITY_AUDIT, PACKAGE_MANUSCRIPT, and FINAL_REVIEW were all processed
++    // Check that CONTINUITY_AUDIT, PACKAGE_MANUSCRIPT, FINAL_REVIEW, and
++    // GENERATE_LISTING were all processed
+     const { enqueue } = await import('@auto-graph/core');
+     const allEnqueued = vi.mocked(enqueue).mock.calls.map(([, item]) => item);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'CONTINUITY_AUDIT')).toBe(true);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'PACKAGE_MANUSCRIPT')).toBe(true);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'FINAL_REVIEW')).toBe(true);
++    expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'GENERATE_LISTING')).toBe(true);
+ 
+-    // Verify DynamoDB state: project created
++    // Verify DynamoDB state: project created and released after a valid listing
+     const project = store.projects.get(PROJECT_ID);
+     expect(project).toBeDefined();
+-    expect(project!.status).toBe('COMPLETE');
++    expect(project!.status).toBe('RELEASED');
+ 
+     // Task graph should have chapter 1 with MERGED status
+     const latestVersion = store.taskGraphLatestVersion.get(PROJECT_ID);
+@@ -205,6 +214,8 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       'PACKAGE_MANUSCRIPT',
+       'RECONCILE', // packager
+       'FINAL_REVIEW',
++      'GENERATE_LISTING',
++      'RECONCILE', // marketer
+     ];
+ 
+     expect(types).toEqual(expectedSequence);
+diff --git a/packages/lambdas/src/handlers/__tests__/final-review.test.ts b/packages/lambdas/src/handlers/__tests__/final-review.test.ts
+index 390555f..c62152d 100644
+--- a/packages/lambdas/src/handlers/__tests__/final-review.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/final-review.test.ts
+@@ -9,6 +9,7 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+     ProjectService: vi.fn(),
+     TaskGraphService: vi.fn(),
+     createGitHubClient: vi.fn(),
++    enqueue: vi.fn().mockResolvedValue(undefined),
+   };
+ });
+ 
+@@ -16,6 +17,7 @@ import {
+   ProjectService,
+   TaskGraphService,
+   createGitHubClient,
++  enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+ import { handler } from '../final-review.js';
+@@ -107,6 +109,7 @@ function makeEvent(projectId: string): SQSEvent {
+ 
+ beforeEach(() => {
+   vi.clearAllMocks();
++  vi.mocked(enqueue).mockResolvedValue(undefined);
+ 
+   for (const [key, value] of Object.entries(baseEnv)) {
+     process.env[key] = value;
+@@ -179,6 +182,15 @@ describe('final-review handler', () => {
+     expect(message).toContain('enable');
+   });
+ 
++  it('enqueues GENERATE_LISTING to start the release phase second stage', async () => {
++    await handler(makeEvent('proj-123'), {} as never, () => {});
++
++    expect(vi.mocked(enqueue)).toHaveBeenCalledWith(
++      'https://sqs.us-east-1.amazonaws.com/123/test.fifo',
++      { type: 'GENERATE_LISTING', projectId: 'proj-123' },
++    );
++  });
++
+   it('throws when project is not found', async () => {
+     mockProjectServiceMethods.get.mockResolvedValueOnce(undefined);
+ 
+diff --git a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+index 0326a0d..04106a8 100644
+--- a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+@@ -164,6 +164,7 @@ function makeEvent(records: SQSRecord[]): SQSEvent {
+ 
+ let mockProjectServiceMethods: {
+   get: ReturnType<typeof vi.fn>;
++  updateStatus: ReturnType<typeof vi.fn>;
+ };
+ let mockTaskGraphServiceMethods: {
+   getLatest: ReturnType<typeof vi.fn>;
+@@ -214,6 +215,7 @@ beforeEach(() => {
+ 
+   mockProjectServiceMethods = {
+     get: vi.fn().mockResolvedValue(validProject),
++    updateStatus: vi.fn().mockResolvedValue(undefined),
+   };
+   vi.mocked(ProjectService).mockImplementation(() => mockProjectServiceMethods as never);
+ 
+@@ -394,6 +396,22 @@ describe('RECONCILE — task failure', () => {
+     expect(failedCommentCalls).toHaveLength(0);
+   });
+ 
++  it('re-enqueues GENERATE_LISTING when a marketer run fails transiently', async () => {
++    mockAgentRunServiceMethods.get.mockResolvedValueOnce(
++      makeAgentRun({ workerType: 'marketer', nodeId: undefined }),
++    );
++    mockAgentRunServiceMethods.listByProject.mockResolvedValueOnce([
++      makeAgentRun({ workerType: 'marketer', status: 'FAILED' }),
++    ]);
++
++    const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
++    await handler(makeEvent([makeRecord(workItem)]));
++
++    expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
++    const [, enqueuedItem] = vi.mocked(enqueue).mock.calls[0]!;
++    expect(enqueuedItem).toEqual({ type: 'GENERATE_LISTING', projectId: 'proj-123' });
++  });
++
+   it('does not update node or comment when agent run has no nodeId', async () => {
+     mockAgentRunServiceMethods.get.mockResolvedValueOnce(makeAgentRun({ nodeId: undefined }));
+ 
+@@ -1019,6 +1037,98 @@ describe('RECONCILE — continuity-checker success', () => {
+   });
+ });
+ 
++// ---------------------------------------------------------------------------
++// Success path — marketer
++// ---------------------------------------------------------------------------
++
++const validListing = {
++  title: 'The Dark Tower',
++  blurb: 'A gunslinger pursues the Man in Black across a vast and ruined desert.',
++  keywords: ['gunslinger', 'dark fantasy', 'quest', 'desert', 'wasteland', 'epic', 'sorcery'],
++  categories: ['Fantasy', 'Adventure', 'Dark Fantasy'],
++  author: 'Auto Graph',
++};
++
++describe('RECONCILE — marketer success (valid listing)', () => {
++  beforeEach(() => {
++    mockAgentRunServiceMethods.get.mockResolvedValue(
++      makeAgentRun({ workerType: 'marketer', nodeId: undefined }),
++    );
++    mockGitHubClientMethods.getFileContent.mockResolvedValue(
++      makeFileContent(JSON.stringify(validListing)),
++    );
++  });
++
++  it('fetches release/listing.json from the repo', async () => {
++    const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
++    await handler(makeEvent([makeRecord(workItem)]));
++
++    expect(mockGitHubClientMethods.getFileContent).toHaveBeenCalledWith(
++      { owner: 'test-org', repo: 'the-dark-tower' },
++      'release/listing.json',
++      'main',
++    );
++  });
++
++  it('sets project status to RELEASED', async () => {
++    const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
++    await handler(makeEvent([makeRecord(workItem)]));
++
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'RELEASED');
++  });
++
++  it('does not enqueue further work', async () => {
++    const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
++    await handler(makeEvent([makeRecord(workItem)]));
++
++    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
++  });
++});
++
++describe('RECONCILE — marketer success (invalid listing)', () => {
++  beforeEach(() => {
++    mockAgentRunServiceMethods.get.mockResolvedValue(
++      makeAgentRun({ workerType: 'marketer', nodeId: undefined }),
++    );
++    mockGitHubClientMethods.getFileContent.mockResolvedValue(
++      makeFileContent(JSON.stringify({ ...validListing, keywords: ['only-one'] })),
++    );
++  });
++
++  it('sets project status to FAILED', async () => {
++    const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
++    await handler(makeEvent([makeRecord(workItem)]));
++
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'FAILED');
++  });
++});
++
++describe('RECONCILE — marketer success (missing/unparseable listing)', () => {
++  beforeEach(() => {
++    mockAgentRunServiceMethods.get.mockResolvedValue(
++      makeAgentRun({ workerType: 'marketer', nodeId: undefined }),
++    );
++  });
++
++  it('sets project status to FAILED when the file cannot be read', async () => {
++    mockGitHubClientMethods.getFileContent.mockRejectedValueOnce(new Error('Not Found'));
++
++    const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
++    await handler(makeEvent([makeRecord(workItem)]));
++
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'FAILED');
++  });
++
++  it('sets project status to FAILED when the file is not valid JSON', async () => {
++    mockGitHubClientMethods.getFileContent.mockResolvedValue(makeFileContent('not json'));
++
++    const workItem = { type: 'RECONCILE' as const, projectId: 'proj-123', runId: 'run-abc' };
++    await handler(makeEvent([makeRecord(workItem)]));
++
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'FAILED');
++  });
++});
++
+ // ---------------------------------------------------------------------------
+ // Error handling
+ // ---------------------------------------------------------------------------
+diff --git a/packages/lambdas/src/handlers/dispatcher.ts b/packages/lambdas/src/handlers/dispatcher.ts
+index 1c21d20..f1da413 100644
+--- a/packages/lambdas/src/handlers/dispatcher.ts
++++ b/packages/lambdas/src/handlers/dispatcher.ts
+@@ -18,6 +18,7 @@ import { handle as handleContinuityAudit } from './continuity-audit.js';
+ import { handle as handleContinuityFix } from './continuity-fixer.js';
+ import { handle as handleFinalReview } from './final-review.js';
+ import { handle as handlePackageManuscript } from './package-manuscript.js';
++import { handle as handleGenerateListing } from './generate-listing.js';
+ 
+ type HandlerFn = (workItem: WorkItem, context: HandlerContext) => Promise<void>;
+ 
+@@ -38,6 +39,7 @@ const handlers: Record<string, HandlerFn> = {
+   CONTINUITY_FIX: handleContinuityFix,
+   FINAL_REVIEW: handleFinalReview,
+   PACKAGE_MANUSCRIPT: handlePackageManuscript,
++  GENERATE_LISTING: handleGenerateListing,
+ };
+ 
+ const sqsHandler = withSQSHandler(async (workItem, context) => {
+diff --git a/packages/lambdas/src/handlers/final-review.ts b/packages/lambdas/src/handlers/final-review.ts
+index 276a80e..713f6a0 100644
+--- a/packages/lambdas/src/handlers/final-review.ts
++++ b/packages/lambdas/src/handlers/final-review.ts
+@@ -5,6 +5,7 @@ import {
+   createGitHubClient,
+   validateWordCount,
+   buildBookWorkflow,
++  enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+ import { withSQSHandler } from '../shared/index.js';
+@@ -75,7 +76,14 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     'ci: enable build-book workflow push trigger',
+   );
+ 
+-  logger.info('Final review complete, project marked COMPLETE', {
++  // The manuscript is packaged and reviewed — proceed to the release phase's
++  // second stage, where the marketer writes and validates the store listing.
++  await enqueue(config.SQS_QUEUE_URL, {
++    type: 'GENERATE_LISTING',
++    projectId,
++  });
++
++  logger.info('Final review complete, project marked COMPLETE, enqueued GENERATE_LISTING', {
+     projectId,
+     totalWordCount,
+     chapterCount,
+diff --git a/packages/lambdas/src/handlers/generate-listing.ts b/packages/lambdas/src/handlers/generate-listing.ts
+new file mode 100644
+index 0000000..12c4a06
+--- /dev/null
++++ b/packages/lambdas/src/handlers/generate-listing.ts
+@@ -0,0 +1,66 @@
++import {
++  createDynamoClient,
++  ProjectService,
++  AgentRunService,
++  TaskOutputService,
++  buildMarketerPrompt,
++  enqueue,
++} from '@auto-graph/core';
++import type { WorkItem } from '@auto-graph/core';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
++import type { HandlerContext } from '../shared/index.js';
++
++export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
++  const { logger, config } = context;
++
++  if (workItem.type !== 'GENERATE_LISTING') {
++    throw new Error(`Unexpected work item type: ${workItem.type}`);
++  }
++
++  const { projectId } = workItem;
++
++  const marketerTaskDefArn = process.env['MARKETER_TASK_DEF_ARN'];
++  if (!marketerTaskDefArn) {
++    throw new Error('MARKETER_TASK_DEF_ARN environment variable is not set');
++  }
++
++  const dynamoClient = createDynamoClient(config.AWS_REGION);
++  const projectService = new ProjectService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const agentRunService = new AgentRunService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const taskOutputService = new TaskOutputService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++
++  const project = await projectService.get(projectId);
++  if (!project) {
++    throw new Error(`Project not found: ${projectId}`);
++  }
++
++  const systemPrompt = buildMarketerPrompt({
++    title: project.config.title,
++    repoName: project.repoName,
++    genre: project.config.genre,
++    projectType: project.config.projectType,
++  });
++
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: marketerTaskDefArn,
++    workerType: 'marketer',
++    systemPrompt,
++    projectId,
++    repoName: project.repoName,
++    config,
++    agentRunService,
++    taskOutputService,
++  });
++
++  await projectService.updateStatus(projectId, 'RELEASING');
++
++  await enqueue(config.SQS_QUEUE_URL, {
++    type: 'RECONCILE',
++    projectId,
++    runId,
++  });
++
++  logger.info('Marketer ECS task launched', { projectId, runId, taskArn });
++}
++
++export const handler = withSQSHandler(handle);
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 9a9dbcf..a596b3b 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -13,10 +13,11 @@ import {
+   createGitHubClient,
+   enqueue,
+   validateWordCount,
++  validateListing,
+ } from '@auto-graph/core';
+ import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
+ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+-import type { TaskNode, TaskGraphEdge, RepoRef, GitHubClient, Logger, WorkItem } from '@auto-graph/core';
++import type { TaskNode, TaskGraphEdge, RepoRef, GitHubClient, Logger, WorkItem, KdpListing } from '@auto-graph/core';
+ import type { SQSEvent, SQSBatchResponse } from 'aws-lambda';
+ import { withSQSHandler, getECSTaskStatus } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+@@ -614,6 +615,13 @@ async function runReconcile(
+               runId,
+             );
+             reEnqueued = true;
++          } else if (agentRun.workerType === 'marketer') {
++            await enqueueReaction(
++              config.SQS_QUEUE_URL,
++              { type: 'GENERATE_LISTING', projectId },
++              runId,
++            );
++            reEnqueued = true;
+           }
+           // Note: auditor and fixer failures are handled above with explicit
+           // GitHub-issue creation and feed-forward to PACKAGE_MANUSCRIPT; they
+@@ -1045,6 +1053,42 @@ async function runReconcile(
+       });
+       break;
+     }
++
++    case 'marketer': {
++      // Marketer wrote the store listing — read it back from main, validate
++      // it against KDP's field requirements, and finalize the release status.
++      let validation: ReturnType<typeof validateListing>;
++      try {
++        const listingFile = await github.getFileContent(repo, 'release/listing.json', 'main');
++        const listingContent = Buffer.from(listingFile.content, 'base64').toString('utf-8');
++        const listing = JSON.parse(listingContent) as KdpListing;
++        validation = validateListing(listing);
++      } catch (err) {
++        await projectService.updateStatus(projectId, 'FAILED');
++        logger.error('Marketer succeeded but release/listing.json is missing or unparseable', {
++          projectId,
++          runId,
++          error: err instanceof Error ? err.message : String(err),
++        });
++        break;
++      }
++
++      if (validation.valid) {
++        await projectService.updateStatus(projectId, 'RELEASED');
++        logger.info('Marketer succeeded, listing valid, project released', {
++          projectId,
++          runId,
++        });
++      } else {
++        await projectService.updateStatus(projectId, 'FAILED');
++        logger.error('Marketer succeeded but listing failed validation', {
++          projectId,
++          runId,
++          errorCodes: validation.errors.map((e) => e.code),
++        });
++      }
++      break;
++    }
+   }
+ 
+   logger.info('Reconcile complete', {
+diff --git a/packages/worker/src/__tests__/entrypoint.test.ts b/packages/worker/src/__tests__/entrypoint.test.ts
+index 99145b6..ad63c28 100644
+--- a/packages/worker/src/__tests__/entrypoint.test.ts
++++ b/packages/worker/src/__tests__/entrypoint.test.ts
+@@ -85,6 +85,11 @@ vi.mock('../workers/packager.js', () => ({
+   finalize: vi.fn().mockResolvedValue(undefined),
+ }));
+ 
++vi.mock('../workers/marketer.js', () => ({
++  prepare: vi.fn().mockResolvedValue(undefined),
++  finalize: vi.fn().mockResolvedValue(undefined),
++}));
++
+ import { spawnSync } from 'node:child_process';
+ import { writeFileSync, readFileSync } from 'node:fs';
+ import { exec, spawn, spawnWithStderr } from '../exec.js';
+@@ -254,6 +259,12 @@ describe('loadWorker', () => {
+     expect(typeof worker.finalize).toBe('function');
+   });
+ 
++  it('loads the marketer worker', async () => {
++    const worker = await loadWorker('marketer');
++    expect(typeof worker.prepare).toBe('function');
++    expect(typeof worker.finalize).toBe('function');
++  });
++
+   it('throws for unknown worker type', async () => {
+     await expect(loadWorker('unknown')).rejects.toThrow('Unknown worker type: unknown');
+   });
+diff --git a/packages/worker/src/__tests__/workers.test.ts b/packages/worker/src/__tests__/workers.test.ts
+index 0f8398e..de34709 100644
+--- a/packages/worker/src/__tests__/workers.test.ts
++++ b/packages/worker/src/__tests__/workers.test.ts
+@@ -24,6 +24,10 @@ import {
+   prepare as packagerPrepare,
+   finalize as packagerFinalize,
+ } from '../workers/packager.js';
++import {
++  prepare as marketerPrepare,
++  finalize as marketerFinalize,
++} from '../workers/marketer.js';
+ 
+ const baseEnv: WorkerEnv = {
+   SYSTEM_PROMPT: Buffer.from('test prompt').toString('base64'),
+@@ -306,3 +310,19 @@ describe('packager worker', () => {
+     expect(vi.mocked(exec)).not.toHaveBeenCalled();
+   });
+ });
++
++// ---------------------------------------------------------------------------
++// Marketer worker
++// ---------------------------------------------------------------------------
++
++describe('marketer worker', () => {
++  it('prepare does nothing', async () => {
++    await marketerPrepare('/tmp/repo', baseEnv);
++    expect(vi.mocked(exec)).not.toHaveBeenCalled();
++  });
++
++  it('finalize does nothing', async () => {
++    await marketerFinalize('/tmp/repo', baseEnv);
++    expect(vi.mocked(exec)).not.toHaveBeenCalled();
++  });
++});
+diff --git a/packages/worker/src/entrypoint.ts b/packages/worker/src/entrypoint.ts
+index 56d0280..aa30ecc 100644
+--- a/packages/worker/src/entrypoint.ts
++++ b/packages/worker/src/entrypoint.ts
+@@ -78,6 +78,7 @@ export async function loadWorker(workerType: string): Promise<WorkerModule> {
+     auditor: () => import('./workers/auditor.js') as Promise<WorkerModule>,
+     fixer: () => import('./workers/continuity-fixer.js') as Promise<WorkerModule>,
+     packager: () => import('./workers/packager.js') as Promise<WorkerModule>,
++    marketer: () => import('./workers/marketer.js') as Promise<WorkerModule>,
+   };
+ 
+   const loader = loaders[workerType];
+diff --git a/packages/worker/src/workers/marketer.ts b/packages/worker/src/workers/marketer.ts
+new file mode 100644
+index 0000000..d68b999
+--- /dev/null
++++ b/packages/worker/src/workers/marketer.ts
+@@ -0,0 +1,10 @@
++import type { WorkerEnv } from '../types.js';
++
++export async function prepare(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // Marketer works on main branch; no branch setup required
++}
++
++export async function finalize(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // The marketer commits and pushes the store listing directly — no
++  // post-processing needed
++}

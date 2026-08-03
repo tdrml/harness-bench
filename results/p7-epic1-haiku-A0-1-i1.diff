@@ -1,18 +1,19 @@
 diff --git a/packages/core/src/index.ts b/packages/core/src/index.ts
-index e0172d6..3d1b5b1 100644
+index e0172d6..70ae925 100644
 --- a/packages/core/src/index.ts
 +++ b/packages/core/src/index.ts
-@@ -9,3 +9,4 @@ export * from './writing/index.js';
+@@ -8,4 +8,5 @@ export * from './queue/index.js';
+ export * from './writing/index.js';
  export * from './prompts/index.js';
  export * from './merge-policy/index.js';
- export * from './templates/index.js';
 +export * from './release-policy/index.js';
+ export * from './templates/index.js';
 diff --git a/packages/core/src/release-policy/__tests__/release-policy.test.ts b/packages/core/src/release-policy/__tests__/release-policy.test.ts
 new file mode 100644
-index 0000000..500f93e
+index 0000000..732db54
 --- /dev/null
 +++ b/packages/core/src/release-policy/__tests__/release-policy.test.ts
-@@ -0,0 +1,309 @@
+@@ -0,0 +1,442 @@
 +import { describe, it, expect } from 'vitest';
 +import {
 +  validateListing,
@@ -23,302 +24,435 @@ index 0000000..500f93e
 +} from '../index.js';
 +import type { KdpListing } from '../index.js';
 +
-+const validListing: KdpListing = {
-+  title: 'Valid Title',
-+  subtitle: 'A valid subtitle',
-+  blurb: 'This is a valid blurb with proper content.',
-+  keywords: ['key1', 'key2', 'key3', 'key4', 'key5', 'key6', 'key7'],
-+  categories: ['cat1', 'cat2', 'cat3'],
-+  author: 'John Doe',
-+};
++const createValidListing = (overrides?: Partial<KdpListing>): KdpListing => ({
++  title: 'Test Book',
++  subtitle: 'A Test Subtitle',
++  blurb: 'This is a valid blurb with some content that meets all requirements.',
++  keywords: ['keyword1', 'keyword2', 'keyword3', 'keyword4', 'keyword5', 'keyword6', 'keyword7'],
++  categories: ['Fiction', 'Adventure', 'Fantasy'],
++  author: 'Test Author',
++  ...overrides,
++});
 +
 +describe('validateListing', () => {
-+  describe('valid listing', () => {
-+    it('returns valid: true for a properly formed listing', () => {
-+      const result = validateListing(validListing);
-+      expect(result.valid).toBe(true);
-+      expect(result.errors).toHaveLength(0);
-+    });
-+
-+    it('allows listing without optional subtitle', () => {
-+      const listing: KdpListing = {
-+        title: 'Title',
-+        blurb: 'Valid blurb content.',
-+        keywords: ['key1', 'key2', 'key3', 'key4', 'key5', 'key6', 'key7'],
-+        categories: ['cat1', 'cat2', 'cat3'],
-+        author: 'Author',
-+      };
++  describe('valid listings', () => {
++    it('validates a completely valid listing', () => {
++      const listing = createValidListing();
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(true);
 +      expect(result.errors).toHaveLength(0);
 +    });
-+  });
 +
-+  describe('BLURB_EMPTY', () => {
-+    it('fails when blurb is empty string', () => {
-+      const listing = { ...validListing, blurb: '' };
++    it('validates a listing without subtitle', () => {
++      const listing = createValidListing({ subtitle: undefined });
 +      const result = validateListing(listing);
-+      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'BLURB_EMPTY')).toBe(true);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
 +    });
 +
-+    it('fails when blurb is whitespace only', () => {
-+      const listing = { ...validListing, blurb: '   \n\t  ' };
++    it('validates a listing with allowed HTML tags in blurb', () => {
++      const listing = createValidListing({
++        blurb: 'This is <b>bold</b> text with <i>italic</i> and <u>underline</u>. Also <br/> newline and <p>paragraph</p>.',
++      });
 +      const result = validateListing(listing);
-+      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'BLURB_EMPTY')).toBe(true);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('validates a listing with multiple allowed list tags', () => {
++      const listing = createValidListing({
++        blurb: '<ul><li>Item 1</li><li>Item 2</li></ul>',
++      });
++      const result = validateListing(listing);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('validates a listing with heading tags h4, h5, h6', () => {
++      const listing = createValidListing({
++        blurb: '<h4>Heading 4</h4><h5>Heading 5</h5><h6>Heading 6</h6>',
++      });
++      const result = validateListing(listing);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('validates a listing with maximum allowed blurb length', () => {
++      const listing = createValidListing({
++        blurb: 'a'.repeat(MAX_BLURB_LENGTH),
++      });
++      const result = validateListing(listing);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
 +    });
 +  });
 +
 +  describe('BLURB_TOO_LONG', () => {
-+    it('passes when blurb is exactly at max length', () => {
-+      const listing = {
-+        ...validListing,
-+        blurb: 'a'.repeat(MAX_BLURB_LENGTH),
-+      };
-+      const result = validateListing(listing);
-+      expect(result.errors.some((e) => e.code === 'BLURB_TOO_LONG')).toBe(false);
-+    });
-+
-+    it('fails when blurb exceeds max length', () => {
-+      const listing = {
-+        ...validListing,
++    it('reports error when blurb exceeds maximum length', () => {
++      const listing = createValidListing({
 +        blurb: 'a'.repeat(MAX_BLURB_LENGTH + 1),
-+      };
++      });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'BLURB_TOO_LONG')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'BLURB_TOO_LONG');
++      expect(error).toBeDefined();
++      expect(error?.detail).toContain(MAX_BLURB_LENGTH.toString());
++    });
++
++    it('does not report BLURB_TOO_LONG when blurb is at exact limit', () => {
++      const listing = createValidListing({
++        blurb: 'a'.repeat(MAX_BLURB_LENGTH),
++      });
++      const result = validateListing(listing);
++      const error = result.errors.find((e) => e.code === 'BLURB_TOO_LONG');
++      expect(error).toBeUndefined();
++    });
++  });
++
++  describe('BLURB_EMPTY', () => {
++    it('reports error when blurb is empty string', () => {
++      const listing = createValidListing({ blurb: '' });
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      const error = result.errors.find((e) => e.code === 'BLURB_EMPTY');
++      expect(error).toBeDefined();
++    });
++
++    it('reports error when blurb is only whitespace', () => {
++      const listing = createValidListing({ blurb: '   \n\t  ' });
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      const error = result.errors.find((e) => e.code === 'BLURB_EMPTY');
++      expect(error).toBeDefined();
++    });
++
++    it('does not report BLURB_EMPTY when blurb has content', () => {
++      const listing = createValidListing({ blurb: '  content  ' });
++      const result = validateListing(listing);
++      const error = result.errors.find((e) => e.code === 'BLURB_EMPTY');
++      expect(error).toBeUndefined();
 +    });
 +  });
 +
 +  describe('KEYWORD_COUNT', () => {
-+    it('passes with exactly 7 keywords', () => {
-+      const listing = {
-+        ...validListing,
-+        keywords: ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7'],
-+      };
-+      const result = validateListing(listing);
-+      expect(result.errors.some((e) => e.code === 'KEYWORD_COUNT')).toBe(false);
-+    });
-+
-+    it('fails with fewer than 7 keywords', () => {
-+      const listing = {
-+        ...validListing,
-+        keywords: ['k1', 'k2', 'k3', 'k4', 'k5', 'k6'],
-+      };
++    it('reports error when keywords count is less than required', () => {
++      const listing = createValidListing({
++        keywords: ['keyword1', 'keyword2', 'keyword3'],
++      });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'KEYWORD_COUNT')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'KEYWORD_COUNT');
++      expect(error).toBeDefined();
++      expect(error?.detail).toContain(REQUIRED_KEYWORD_COUNT.toString());
++      expect(error?.detail).toContain('3');
 +    });
 +
-+    it('fails with more than 7 keywords', () => {
-+      const listing = {
-+        ...validListing,
-+        keywords: ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8'],
-+      };
++    it('reports error when keywords count is more than required', () => {
++      const listing = createValidListing({
++        keywords: Array(10).fill('keyword'),
++      });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'KEYWORD_COUNT')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'KEYWORD_COUNT');
++      expect(error).toBeDefined();
++      expect(error?.detail).toContain(REQUIRED_KEYWORD_COUNT.toString());
++      expect(error?.detail).toContain('10');
++    });
++
++    it('does not report KEYWORD_COUNT when count matches exactly', () => {
++      const listing = createValidListing({
++        keywords: Array(REQUIRED_KEYWORD_COUNT).fill('keyword'),
++      });
++      const result = validateListing(listing);
++      const error = result.errors.find((e) => e.code === 'KEYWORD_COUNT');
++      expect(error).toBeUndefined();
 +    });
 +  });
 +
 +  describe('CATEGORY_COUNT', () => {
-+    it('passes with exactly 3 categories', () => {
-+      const listing = {
-+        ...validListing,
-+        categories: ['cat1', 'cat2', 'cat3'],
-+      };
-+      const result = validateListing(listing);
-+      expect(result.errors.some((e) => e.code === 'CATEGORY_COUNT')).toBe(false);
-+    });
-+
-+    it('fails with fewer than 3 categories', () => {
-+      const listing = {
-+        ...validListing,
-+        categories: ['cat1', 'cat2'],
-+      };
++    it('reports error when categories count is less than required', () => {
++      const listing = createValidListing({
++        categories: ['Fiction', 'Adventure'],
++      });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'CATEGORY_COUNT')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'CATEGORY_COUNT');
++      expect(error).toBeDefined();
++      expect(error?.detail).toContain(REQUIRED_CATEGORY_COUNT.toString());
++      expect(error?.detail).toContain('2');
 +    });
 +
-+    it('fails with more than 3 categories', () => {
-+      const listing = {
-+        ...validListing,
-+        categories: ['cat1', 'cat2', 'cat3', 'cat4'],
-+      };
++    it('reports error when categories count is more than required', () => {
++      const listing = createValidListing({
++        categories: ['Fiction', 'Adventure', 'Fantasy', 'Science Fiction', 'Mystery'],
++      });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'CATEGORY_COUNT')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'CATEGORY_COUNT');
++      expect(error).toBeDefined();
++      expect(error?.detail).toContain(REQUIRED_CATEGORY_COUNT.toString());
++      expect(error?.detail).toContain('5');
++    });
++
++    it('does not report CATEGORY_COUNT when count matches exactly', () => {
++      const listing = createValidListing({
++        categories: ['Fiction', 'Adventure', 'Fantasy'],
++      });
++      const result = validateListing(listing);
++      const error = result.errors.find((e) => e.code === 'CATEGORY_COUNT');
++      expect(error).toBeUndefined();
 +    });
 +  });
 +
 +  describe('UNRESOLVED_PLACEHOLDER', () => {
-+    it('fails when title contains TODO:', () => {
-+      const listing = { ...validListing, title: 'TODO: Complete title' };
++    it('reports error when title contains TODO:', () => {
++      const listing = createValidListing({ title: 'TODO: Book Title' });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'UNRESOLVED_PLACEHOLDER')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
++      expect(error).toBeDefined();
 +    });
 +
-+    it('fails when subtitle contains TODO:', () => {
-+      const listing = { ...validListing, subtitle: 'TODO: Complete subtitle' };
++    it('reports error when subtitle contains TODO:', () => {
++      const listing = createValidListing({ subtitle: 'TODO: Subtitle' });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'UNRESOLVED_PLACEHOLDER')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
++      expect(error).toBeDefined();
 +    });
 +
-+    it('fails when blurb contains TODO:', () => {
-+      const listing = { ...validListing, blurb: 'This is TODO: incomplete' };
++    it('reports error when blurb contains TODO:', () => {
++      const listing = createValidListing({ blurb: 'This is TODO: incomplete' });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'UNRESOLVED_PLACEHOLDER')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
++      expect(error).toBeDefined();
 +    });
 +
-+    it('fails when author contains TODO:', () => {
-+      const listing = { ...validListing, author: 'TODO: Author Name' };
++    it('reports error when author contains TODO:', () => {
++      const listing = createValidListing({ author: 'TODO: Author Name' });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'UNRESOLVED_PLACEHOLDER')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
++      expect(error).toBeDefined();
 +    });
 +
-+    it('fails when a keyword contains TODO:', () => {
-+      const listing = {
-+        ...validListing,
-+        keywords: ['k1', 'k2', 'TODO: keyword', 'k4', 'k5', 'k6', 'k7'],
-+      };
++    it('reports error when any keyword contains TODO:', () => {
++      const listing = createValidListing({
++        keywords: ['keyword1', 'keyword2', 'TODO: keyword', 'keyword4', 'keyword5', 'keyword6', 'keyword7'],
++      });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'UNRESOLVED_PLACEHOLDER')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
++      expect(error).toBeDefined();
 +    });
 +
-+    it('fails when a category contains TODO:', () => {
-+      const listing = {
-+        ...validListing,
-+        categories: ['cat1', 'TODO: category', 'cat3'],
-+      };
++    it('reports error when any category contains TODO:', () => {
++      const listing = createValidListing({
++        categories: ['Fiction', 'TODO: Category', 'Fantasy'],
++      });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'UNRESOLVED_PLACEHOLDER')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
++      expect(error).toBeDefined();
 +    });
 +
-+    it('reports only one placeholder error even with multiple placeholders', () => {
-+      const listing = {
-+        ...validListing,
-+        title: 'TODO: title',
-+        blurb: 'TODO: blurb content',
-+        author: 'TODO: author',
-+      };
++    it('reports UNRESOLVED_PLACEHOLDER only once even with multiple TODOs', () => {
++      const listing = createValidListing({
++        title: 'TODO: Title',
++        author: 'TODO: Author',
++      });
 +      const result = validateListing(listing);
-+      const placeholderErrors = result.errors.filter((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
-+      expect(placeholderErrors).toHaveLength(1);
++      const errors = result.errors.filter((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
++      expect(errors).toHaveLength(1);
++    });
++
++    it('does not report error when no TODO: is present', () => {
++      const listing = createValidListing();
++      const result = validateListing(listing);
++      const error = result.errors.find((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
++      expect(error).toBeUndefined();
 +    });
 +  });
 +
 +  describe('DISALLOWED_HTML', () => {
-+    it('passes with allowed HTML tags', () => {
-+      const blurb = 'This is <b>bold</b> and <i>italic</i> and <u>underlined</u>. <br/> <p>Paragraph</p> <ul><li>Item</li></ul> <ol><li>Item</li></ol> <h4>Heading</h4> <h5>Heading</h5> <h6>Heading</h6>';
-+      const listing = { ...validListing, blurb };
-+      const result = validateListing(listing);
-+      expect(result.errors.some((e) => e.code === 'DISALLOWED_HTML')).toBe(false);
-+    });
-+
-+    it('fails with disallowed HTML tag', () => {
-+      const listing = { ...validListing, blurb: 'Text with <span>disallowed</span> tag' };
++    it('reports error when blurb contains disallowed HTML tag', () => {
++      const listing = createValidListing({
++        blurb: 'This has <span>disallowed</span> tag',
++      });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+      expect(result.errors.some((e) => e.code === 'DISALLOWED_HTML')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'DISALLOWED_HTML');
++      expect(error).toBeDefined();
 +    });
 +
-+    it('fails with multiple disallowed HTML tags (reports first one)', () => {
-+      const listing = {
-+        ...validListing,
-+        blurb: 'Text with <div>div</div> and <section>section</section>',
-+      };
++    it('reports error when blurb contains disallowed div tag', () => {
++      const listing = createValidListing({
++        blurb: '<div>content</div>',
++      });
 +      const result = validateListing(listing);
-+      const htmlErrors = result.errors.filter((e) => e.code === 'DISALLOWED_HTML');
-+      expect(htmlErrors).toHaveLength(1);
++      expect(result.valid).toBe(false);
++      const error = result.errors.find((e) => e.code === 'DISALLOWED_HTML');
++      expect(error).toBeDefined();
 +    });
 +
-+    it('matches HTML tags case-insensitively', () => {
-+      const listing = { ...validListing, blurb: 'Text with <SPAN>uppercase tag</SPAN>' };
++    it('detects disallowed tags case-insensitively', () => {
++      const listing = createValidListing({
++        blurb: 'This has <SPAN>disallowed</SPAN> tag',
++      });
 +      const result = validateListing(listing);
-+      expect(result.errors.some((e) => e.code === 'DISALLOWED_HTML')).toBe(true);
++      expect(result.valid).toBe(false);
++      const error = result.errors.find((e) => e.code === 'DISALLOWED_HTML');
++      expect(error).toBeDefined();
 +    });
 +
-+    it('checks closing tags against allowlist', () => {
-+      const listing = { ...validListing, blurb: 'Text with </b> closing tag' };
++    it('detects h1, h2, h3 as disallowed (only h4, h5, h6 are allowed)', () => {
++      const listing = createValidListing({
++        blurb: '<h1>Title</h1>',
++      });
 +      const result = validateListing(listing);
-+      expect(result.errors.some((e) => e.code === 'DISALLOWED_HTML')).toBe(false);
++      expect(result.valid).toBe(false);
++      const error = result.errors.find((e) => e.code === 'DISALLOWED_HTML');
++      expect(error).toBeDefined();
 +    });
 +
-+    it('fails with h1, h2, h3 (outside allowlist)', () => {
-+      const listing = { ...validListing, blurb: 'Text with <h1>heading</h1>' };
++    it('allows lowercase allowed tags', () => {
++      const listing = createValidListing({
++        blurb: '<b>bold</b> <i>italic</i> <u>underline</u>',
++      });
 +      const result = validateListing(listing);
-+      expect(result.errors.some((e) => e.code === 'DISALLOWED_HTML')).toBe(true);
++      const error = result.errors.find((e) => e.code === 'DISALLOWED_HTML');
++      expect(error).toBeUndefined();
 +    });
 +
-+    it('passes with h4, h5, h6 (in allowlist)', () => {
-+      const listing = {
-+        ...validListing,
-+        blurb: 'Text with <h4>h4</h4> <h5>h5</h5> <h6>h6</h6>',
-+      };
++    it('allows uppercase allowed tags', () => {
++      const listing = createValidListing({
++        blurb: '<B>bold</B> <I>italic</I> <U>underline</U>',
++      });
 +      const result = validateListing(listing);
-+      expect(result.errors.some((e) => e.code === 'DISALLOWED_HTML')).toBe(false);
++      const error = result.errors.find((e) => e.code === 'DISALLOWED_HTML');
++      expect(error).toBeUndefined();
++    });
++
++    it('allows self-closing br tag', () => {
++      const listing = createValidListing({
++        blurb: 'Line 1<br/>Line 2',
++      });
++      const result = validateListing(listing);
++      const error = result.errors.find((e) => e.code === 'DISALLOWED_HTML');
++      expect(error).toBeUndefined();
++    });
++
++    it('reports DISALLOWED_HTML only once even with multiple disallowed tags', () => {
++      const listing = createValidListing({
++        blurb: '<span>bad</span> <div>also bad</div>',
++      });
++      const result = validateListing(listing);
++      const errors = result.errors.filter((e) => e.code === 'DISALLOWED_HTML');
++      expect(errors).toHaveLength(1);
++    });
++
++    it('does not report error when no HTML tags are present', () => {
++      const listing = createValidListing({
++        blurb: 'Just plain text with no tags',
++      });
++      const result = validateListing(listing);
++      const error = result.errors.find((e) => e.code === 'DISALLOWED_HTML');
++      expect(error).toBeUndefined();
 +    });
 +  });
 +
-+  describe('multiple validation errors', () => {
-+    it('reports multiple errors when present', () => {
-+      const listing: KdpListing = {
-+        title: 'Too many keywords',
-+        blurb: '',
-+        keywords: ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8'],
-+        categories: ['cat1'],
-+        author: 'Author',
-+      };
-+      const result = validateListing(listing);
-+      expect(result.valid).toBe(false);
-+      expect(result.errors.length).toBeGreaterThan(1);
-+    });
-+
-+    it('sorts errors by code ascending', () => {
-+      const listing: KdpListing = {
-+        title: 'Title',
-+        blurb: 'Valid blurb with <span>disallowed tag</span> and TODO: placeholder.',
++  describe('error sorting', () => {
++    it('sorts errors by code lexicographically', () => {
++      const listing = createValidListing({
++        blurb: '<span>bad</span>',
 +        keywords: [],
 +        categories: [],
-+        author: 'Author',
-+      };
++      });
++      const result = validateListing(listing);
++      expect(result.errors.length).toBeGreaterThan(1);
++      const codes = result.errors.map((e) => e.code);
++      const sortedCodes = [...codes].sort();
++      expect(codes).toEqual(sortedCodes);
++    });
++
++    it('maintains alphabetical order with multiple errors', () => {
++      const listing = createValidListing({
++        blurb: '',
++        keywords: [],
++        categories: ['only', 'one'],
++        title: 'TODO: title',
++      });
++      const result = validateListing(listing);
++      const codes = result.errors.map((e) => e.code);
++      const firstCode = codes[0];
++      const lastCode = codes[codes.length - 1];
++      expect(firstCode).toBe('BLURB_EMPTY');
++      expect(lastCode).toBeDefined();
++      const comparison = (lastCode ?? '').localeCompare(firstCode ?? '');
++      expect(comparison).toBeGreaterThanOrEqual(0);
++    });
++  });
++
++  describe('multiple simultaneous errors', () => {
++    it('reports all errors when multiple validations fail', () => {
++      const listing = createValidListing({
++        blurb: '',
++        keywords: [],
++        categories: [],
++      });
 +      const result = validateListing(listing);
 +      expect(result.valid).toBe(false);
-+
++      expect(result.errors.length).toBeGreaterThanOrEqual(3);
 +      const codes = result.errors.map((e) => e.code);
-+      for (let i = 1; i < codes.length; i++) {
-+        const currentCode = codes[i];
-+        const previousCode = codes[i - 1];
-+        if (currentCode !== undefined && previousCode !== undefined) {
-+          expect(currentCode.localeCompare(previousCode)).toBeGreaterThanOrEqual(0);
-+        }
-+      }
++      expect(codes).toContain('BLURB_EMPTY');
++      expect(codes).toContain('KEYWORD_COUNT');
++      expect(codes).toContain('CATEGORY_COUNT');
++    });
++
++    it('reports all error types in single validation', () => {
++      const listing = createValidListing({
++        title: 'TODO:',
++        blurb: 'a'.repeat(MAX_BLURB_LENGTH + 1),
++        keywords: ['k1'],
++        categories: ['c1'],
++      });
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes).toContain('BLURB_TOO_LONG');
++      expect(codes).toContain('KEYWORD_COUNT');
++      expect(codes).toContain('CATEGORY_COUNT');
++      expect(codes).toContain('UNRESOLVED_PLACEHOLDER');
 +    });
 +  });
 +
 +  describe('constants', () => {
-+    it('exports MAX_BLURB_LENGTH = 4000', () => {
++    it('exports MAX_BLURB_LENGTH constant', () => {
 +      expect(MAX_BLURB_LENGTH).toBe(4000);
 +    });
 +
-+    it('exports REQUIRED_KEYWORD_COUNT = 7', () => {
++    it('exports REQUIRED_KEYWORD_COUNT constant', () => {
 +      expect(REQUIRED_KEYWORD_COUNT).toBe(7);
 +    });
 +
-+    it('exports REQUIRED_CATEGORY_COUNT = 3', () => {
++    it('exports REQUIRED_CATEGORY_COUNT constant', () => {
 +      expect(REQUIRED_CATEGORY_COUNT).toBe(3);
 +    });
 +
-+    it('exports ALLOWED_BLURB_TAGS with correct values', () => {
-+      expect(ALLOWED_BLURB_TAGS).toEqual(['b', 'i', 'u', 'br', 'p', 'ul', 'li', 'ol', 'h4', 'h5', 'h6']);
++    it('exports ALLOWED_BLURB_TAGS constant with correct tags', () => {
++      expect(ALLOWED_BLURB_TAGS).toContain('b');
++      expect(ALLOWED_BLURB_TAGS).toContain('i');
++      expect(ALLOWED_BLURB_TAGS).toContain('u');
++      expect(ALLOWED_BLURB_TAGS).toContain('br');
++      expect(ALLOWED_BLURB_TAGS).toContain('p');
++      expect(ALLOWED_BLURB_TAGS).toContain('ul');
++      expect(ALLOWED_BLURB_TAGS).toContain('li');
++      expect(ALLOWED_BLURB_TAGS).toContain('ol');
++      expect(ALLOWED_BLURB_TAGS).toContain('h4');
++      expect(ALLOWED_BLURB_TAGS).toContain('h5');
++      expect(ALLOWED_BLURB_TAGS).toContain('h6');
++      expect(ALLOWED_BLURB_TAGS).toHaveLength(11);
 +    });
 +  });
 +});
@@ -362,11 +496,11 @@ index 0000000..a7e5821
 +}
 diff --git a/packages/core/src/release-policy/validate.ts b/packages/core/src/release-policy/validate.ts
 new file mode 100644
-index 0000000..c4e60bd
+index 0000000..9211adc
 --- /dev/null
 +++ b/packages/core/src/release-policy/validate.ts
-@@ -0,0 +1,99 @@
-+import type { KdpListing, ListingValidation, ListingError } from './types.js';
+@@ -0,0 +1,76 @@
++import type { KdpListing, ListingError, ListingValidation } from './types.js';
 +
 +export const MAX_BLURB_LENGTH = 4000;
 +export const REQUIRED_KEYWORD_COUNT = 7;
@@ -376,53 +510,49 @@ index 0000000..c4e60bd
 +export function validateListing(listing: KdpListing): ListingValidation {
 +  const errors: ListingError[] = [];
 +
-+  // Check blurb length
++  // Check BLURB_TOO_LONG
 +  if (listing.blurb.length > MAX_BLURB_LENGTH) {
-+    errors.push({
-+      code: 'BLURB_TOO_LONG',
-+      detail: `Blurb exceeds maximum length of ${MAX_BLURB_LENGTH} characters`,
-+    });
++    errors.push({ code: 'BLURB_TOO_LONG', detail: `Blurb exceeds maximum length of ${MAX_BLURB_LENGTH} characters.` });
 +  }
 +
-+  // Check blurb is not empty
-+  if (listing.blurb.trim() === '') {
-+    errors.push({
-+      code: 'BLURB_EMPTY',
-+      detail: 'Blurb cannot be empty or whitespace only',
-+    });
++  // Check BLURB_EMPTY
++  if (listing.blurb.trim().length === 0) {
++    errors.push({ code: 'BLURB_EMPTY', detail: 'Blurb is empty or whitespace only.' });
 +  }
 +
-+  // Check keyword count
++  // Check KEYWORD_COUNT
 +  if (listing.keywords.length !== REQUIRED_KEYWORD_COUNT) {
-+    errors.push({
-+      code: 'KEYWORD_COUNT',
-+      detail: `Keywords must contain exactly ${REQUIRED_KEYWORD_COUNT} entries, found ${listing.keywords.length}`,
-+    });
++    errors.push({ code: 'KEYWORD_COUNT', detail: `Keywords count must be exactly ${REQUIRED_KEYWORD_COUNT}, got ${listing.keywords.length}.` });
 +  }
 +
-+  // Check category count
++  // Check CATEGORY_COUNT
 +  if (listing.categories.length !== REQUIRED_CATEGORY_COUNT) {
-+    errors.push({
-+      code: 'CATEGORY_COUNT',
-+      detail: `Categories must contain exactly ${REQUIRED_CATEGORY_COUNT} entries, found ${listing.categories.length}`,
-+    });
++    errors.push({ code: 'CATEGORY_COUNT', detail: `Categories count must be exactly ${REQUIRED_CATEGORY_COUNT}, got ${listing.categories.length}.` });
 +  }
 +
-+  // Check for unresolved placeholders
-+  if (hasUnresolvedPlaceholder(listing)) {
-+    errors.push({
-+      code: 'UNRESOLVED_PLACEHOLDER',
-+      detail: 'Listing contains unresolved placeholder "TODO:"',
-+    });
++  // Check UNRESOLVED_PLACEHOLDER - one error total for any TODO: in any string field
++  const allStringFields = [
++    listing.title,
++    listing.subtitle,
++    listing.blurb,
++    listing.author,
++    ...listing.keywords,
++    ...listing.categories,
++  ];
++
++  const hasTodo = allStringFields.some((field) => field !== undefined && field.includes('TODO:'));
++  if (hasTodo) {
++    errors.push({ code: 'UNRESOLVED_PLACEHOLDER', detail: 'Listing contains unresolved placeholder (TODO:).' });
 +  }
 +
-+  // Check for disallowed HTML tags
-+  const disallowedHtmlError = checkDisallowedHtmlTags(listing.blurb);
-+  if (disallowedHtmlError) {
-+    errors.push(disallowedHtmlError);
++  // Check DISALLOWED_HTML - one error total if any disallowed tags found
++  if (!hasDisallowedHtml(listing.blurb, ALLOWED_BLURB_TAGS)) {
++    // No error, so we continue
++  } else {
++    errors.push({ code: 'DISALLOWED_HTML', detail: 'Blurb contains HTML tags outside the allowed list.' });
 +  }
 +
-+  // Sort errors by code ascending
++  // Sort errors by code lexicographically
 +  errors.sort((a, b) => a.code.localeCompare(b.code));
 +
 +  return {
@@ -431,37 +561,18 @@ index 0000000..c4e60bd
 +  };
 +}
 +
-+function hasUnresolvedPlaceholder(listing: KdpListing): boolean {
-+  const fieldsToCheck: string[] = [
-+    listing.title,
-+    listing.blurb,
-+    listing.author,
-+    ...(listing.subtitle ? [listing.subtitle] : []),
-+    ...listing.keywords,
-+    ...listing.categories,
-+  ];
++function hasDisallowedHtml(text: string, allowedTags: string[]): boolean {
++  // Match HTML tags (opening, closing, and self-closing)
++  const tagRegex = /<\/?([a-zA-Z0-9]+)[\s>\/]*>/g;
++  const lowerAllowedTags = allowedTags.map((t) => t.toLowerCase());
 +
-+  return fieldsToCheck.some((field) => field.includes('TODO:'));
-+}
-+
-+function checkDisallowedHtmlTags(blurb: string): ListingError | null {
-+  // Extract all HTML tags from the blurb
-+  const tagRegex = /<\/?([a-zA-Z][a-zA-Z0-9]*)/g;
-+  const matches = blurb.matchAll(tagRegex);
-+
-+  const lowerAllowedTags = ALLOWED_BLURB_TAGS.map((tag) => tag.toLowerCase());
-+
-+  for (const match of matches) {
-+    const tagName = match[1];
-+    if (tagName !== undefined) {
-+      if (!lowerAllowedTags.includes(tagName.toLowerCase())) {
-+        return {
-+          code: 'DISALLOWED_HTML',
-+          detail: `Blurb contains disallowed HTML tag: <${tagName}>`,
-+        };
-+      }
++  let match;
++  while ((match = tagRegex.exec(text)) !== null) {
++    const tagName = match[1]?.toLowerCase();
++    if (tagName && !lowerAllowedTags.includes(tagName)) {
++      return true; // Found a disallowed tag
 +    }
 +  }
 +
-+  return null;
++  return false; // All tags are allowed (or no tags present)
 +}

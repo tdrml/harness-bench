@@ -21,48 +21,10 @@ index 0c391e4..99ec486 100644
  export type AgentRunStatus =
    | 'PENDING'
 diff --git a/packages/core/src/queue/__tests__/queue.test.ts b/packages/core/src/queue/__tests__/queue.test.ts
-index 06fc9e1..f01f904 100644
+index 06fc9e1..5cdab09 100644
 --- a/packages/core/src/queue/__tests__/queue.test.ts
 +++ b/packages/core/src/queue/__tests__/queue.test.ts
-@@ -47,6 +47,25 @@ describe('parseWorkItem', () => {
-     expect(result).toEqual(item);
-   });
- 
-+  it('parses a valid PACKAGE_MANUSCRIPT message without runId', () => {
-+    const item: WorkItem = {
-+      type: 'PACKAGE_MANUSCRIPT',
-+      projectId: 'proj-3',
-+    };
-+    const result = parseWorkItem(JSON.stringify(item));
-+    expect(result).toEqual(item);
-+  });
-+
-+  it('parses a valid PACKAGE_MANUSCRIPT message with runId', () => {
-+    const item: WorkItem = {
-+      type: 'PACKAGE_MANUSCRIPT',
-+      projectId: 'proj-3',
-+      runId: 'run-456',
-+    };
-+    const result = parseWorkItem(JSON.stringify(item));
-+    expect(result).toEqual(item);
-+  });
-+
-   it('throws for non-JSON input', () => {
-     expect(() => parseWorkItem('not json')).toThrow(
-       'Failed to parse work item: body is not valid JSON',
-@@ -63,6 +82,11 @@ describe('parseWorkItem', () => {
-     expect(() => parseWorkItem(body)).toThrow('Invalid work item');
-   });
- 
-+  it('throws for PACKAGE_MANUSCRIPT without projectId', () => {
-+    const body = JSON.stringify({ type: 'PACKAGE_MANUSCRIPT' });
-+    expect(() => parseWorkItem(body)).toThrow('Invalid work item');
-+  });
-+
-   it('throws with descriptive message listing all validation issues', () => {
-     const body = JSON.stringify({ type: 'TRIGGER_CHAPTER', projectId: 'p' });
-     let message = '';
-@@ -75,7 +99,7 @@ describe('parseWorkItem', () => {
+@@ -75,7 +75,7 @@ describe('parseWorkItem', () => {
      expect(message).toContain('nodeId');
    });
  
@@ -71,7 +33,7 @@ index 06fc9e1..f01f904 100644
      const items: WorkItem[] = [
        { type: 'BOOTSTRAP_PROJECT', projectId: 'p', issueNumber: 1, issueBody: 'body' },
        { type: 'BOOTSTRAP_REPO', projectId: 'p', issueNumber: 1 },
-@@ -98,6 +122,7 @@ describe('parseWorkItem', () => {
+@@ -98,6 +98,7 @@ describe('parseWorkItem', () => {
        { type: 'TRIGGER_NEXT_CHAPTER', projectId: 'p' },
        { type: 'RECONCILE_SWEEP' },
        { type: 'FINAL_REVIEW', projectId: 'p' },
@@ -79,6 +41,24 @@ index 06fc9e1..f01f904 100644
      ];
  
      for (const item of items) {
+@@ -237,4 +238,17 @@ describe('enqueue', () => {
+     const calls = sqsMock.commandCalls(SendMessageCommand);
+     expect(calls).toHaveLength(1);
+   });
++
++  it('parses PACKAGE_MANUSCRIPT with optional runId', async () => {
++    sqsMock.on(SendMessageCommand).resolves({});
++
++    const itemWithoutRunId: WorkItem = { type: 'PACKAGE_MANUSCRIPT', projectId: 'proj-10' };
++    await enqueue(queueUrl, itemWithoutRunId, undefined, client);
++
++    const itemWithRunId: WorkItem = { type: 'PACKAGE_MANUSCRIPT', projectId: 'proj-10', runId: 'run-123' };
++    await enqueue(queueUrl, itemWithRunId, undefined, client);
++
++    const calls = sqsMock.commandCalls(SendMessageCommand);
++    expect(calls).toHaveLength(2);
++  });
+ });
 diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
 index f291e73..a4df96e 100644
 --- a/packages/core/src/queue/index.ts

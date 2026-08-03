@@ -1,0 +1,2946 @@
+diff --git a/packages/lambdas/src/__tests__/integration/concurrency.test.ts b/packages/lambdas/src/__tests__/integration/concurrency.test.ts
+index 6e92874..ada05aa 100644
+--- a/packages/lambdas/src/__tests__/integration/concurrency.test.ts
++++ b/packages/lambdas/src/__tests__/integration/concurrency.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/continuity.test.ts b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+index aab8b67..749c529 100644
+--- a/packages/lambdas/src/__tests__/integration/continuity.test.ts
++++ b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+@@ -36,8 +36,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/escalation.test.ts b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+index 786d7d5..8eede8c 100644
+--- a/packages/lambdas/src/__tests__/integration/escalation.test.ts
++++ b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+@@ -34,8 +34,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+index 94efdd5..631bf43 100644
+--- a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
++++ b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+@@ -40,8 +40,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+ // Mock ECS launcher — launchECSTask returns a fake ARN; getECSTaskStatus
+ // returns STOPPED/0 to simulate immediate successful task completion
+ // ---------------------------------------------------------------------------
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+index dcd9217..857d85c 100644
+--- a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
++++ b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts b/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
+index 3c116c2..46273e5 100644
+--- a/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
++++ b/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+index f6c9882..a5c93c2 100644
+--- a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
++++ b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
+index 83a9d70..df118d0 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
+@@ -19,7 +19,10 @@ vi.mock('../../shared/index.js', async (importOriginal) => {
+   const actual = await importOriginal<typeof import('../../shared/index.js')>();
+   return {
+     ...actual,
+-    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/auditor-abc'),
++    launchAgentRun: vi.fn().mockResolvedValue({
++      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++      taskArn: 'arn:aws:ecs:us-east-1:123:task/test/auditor-abc',
++    }),
+   };
+ });
+ 
+@@ -32,7 +35,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchAgentRun } from '../../shared/index.js';
+ import { handler } from '../continuity-audit.js';
+ 
+ const baseEnv = {
+@@ -149,7 +152,10 @@ beforeEach(() => {
+   vi.mocked(TaskOutputService).mockImplementation(() => mockTaskOutputServiceMethods as never);
+ 
+   vi.mocked(buildAuditorPrompt).mockReturnValue('mock auditor system prompt');
+-  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/auditor-abc');
++  vi.mocked(launchAgentRun).mockResolvedValue({
++    runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++    taskArn: 'arn:aws:ecs:us-east-1:123:task/test/auditor-abc',
++  });
+   vi.mocked(enqueue).mockResolvedValue(undefined);
+ });
+ 
+@@ -190,82 +196,61 @@ describe('CONTINUITY_AUDIT — happy path', () => {
+     expect(params.repoName).toBe('the-dark-tower');
+   });
+ 
+-  it('launches auditor ECS task with correct task definition', async () => {
+-    const workItem = { type: 'CONTINUITY_AUDIT' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem)]);
+-
+-    await handler(event, {} as never, () => {});
+-
+-    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.taskDefinition).toBe(baseEnv.AUDITOR_TASK_DEF_ARN);
+-    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
+-  });
+-
+-  it('passes correct environment variables to the ECS task', async () => {
++  it('launches the auditor agent run with correct task definition', async () => {
+     const workItem = { type: 'CONTINUITY_AUDIT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['PROJECT_ID']).toBe('proj-123');
+-    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
+-    expect(typeof params.environment['RUN_ID']).toBe('string');
+-    expect(params.environment['AWS_REGION']).toBe('us-east-1');
+-    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++    expect(vi.mocked(launchAgentRun)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.taskDefArn).toBe(baseEnv.AUDITOR_TASK_DEF_ARN);
+   });
+ 
+-  it('does not pass CHAPTER_NUMBER to the ECS task', async () => {
++  it('passes correct project details to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_AUDIT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['CHAPTER_NUMBER']).toBeUndefined();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.projectId).toBe('proj-123');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.config.AWS_REGION).toBe('us-east-1');
++    expect(params.config.DYNAMODB_TABLE_PREFIX).toBe('test');
+   });
+ 
+-  it('creates an agent run record with workerType auditor and no nodeId', async () => {
++  it('does not pass extraEnv to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_AUDIT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runItem.projectId).toBe('proj-123');
+-    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/auditor-abc');
+-    expect(runItem.workerType).toBe('auditor');
+-    expect(runItem.nodeId).toBeUndefined();
+-    expect(runItem.status).toBe('RUNNING');
+-    expect(typeof runItem.runId).toBe('string');
+-    expect(runItem.runId.length).toBeGreaterThan(0);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.extraEnv).toBeUndefined();
+   });
+ 
+-  it('saves the system prompt to the task-outputs table', async () => {
++  it('passes workerType auditor and no nodeId to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_AUDIT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(outputItem.projectId).toBe('proj-123');
+-    expect(outputItem.outputType).toBe('system-prompt');
+-    expect(outputItem.content).toBe('mock auditor system prompt');
+-    expect(outputItem.contentLength).toBe('mock auditor system prompt'.length);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.workerType).toBe('auditor');
++    expect(params.nodeId).toBeUndefined();
+   });
+ 
+-  it('uses the same runId for agent run and task output records', async () => {
++  it('passes the system prompt and services to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_AUDIT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(runItem.runId).toBe(outputItem.runId);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.systemPrompt).toBe('mock auditor system prompt');
++    expect(params.agentRunService).toBe(mockAgentRunServiceMethods);
++    expect(params.taskOutputService).toBe(mockTaskOutputServiceMethods);
+   });
+ 
+   it('enqueues a RECONCILE work item with the runId', async () => {
+@@ -280,8 +265,7 @@ describe('CONTINUITY_AUDIT — happy path', () => {
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+-      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-      expect(enqueuedItem.runId).toBe(runItem.runId);
++      expect(enqueuedItem.runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+     }
+   });
+ 
+@@ -309,7 +293,7 @@ describe('CONTINUITY_AUDIT — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when project is not found', async () => {
+@@ -321,7 +305,7 @@ describe('CONTINUITY_AUDIT — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when task graph is not found', async () => {
+@@ -333,11 +317,11 @@ describe('CONTINUITY_AUDIT — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-graph' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+-  it('returns batch failure when ECS task launch fails', async () => {
+-    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++  it('returns batch failure when launchAgentRun fails', async () => {
++    vi.mocked(launchAgentRun).mockRejectedValueOnce(new Error('ECS error'));
+ 
+     const workItem = { type: 'CONTINUITY_AUDIT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
+@@ -345,18 +329,6 @@ describe('CONTINUITY_AUDIT — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
+-  });
+-
+-  it('returns batch failure when agent run creation fails', async () => {
+-    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const workItem = { type: 'CONTINUITY_AUDIT' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ 
+@@ -379,7 +351,7 @@ describe('CONTINUITY_AUDIT — error handling', () => {
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
+     expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+index 345fb1c..045ed37 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+@@ -20,7 +20,10 @@ vi.mock('../../shared/index.js', async (importOriginal) => {
+   const actual = await importOriginal<typeof import('../../shared/index.js')>();
+   return {
+     ...actual,
+-    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/continuity-abc'),
++    launchAgentRun: vi.fn().mockResolvedValue({
++      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++      taskArn: 'arn:aws:ecs:us-east-1:123:task/test/continuity-abc',
++    }),
+   };
+ });
+ 
+@@ -34,7 +37,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchAgentRun } from '../../shared/index.js';
+ import { handler } from '../continuity-check.js';
+ 
+ const baseEnv = {
+@@ -165,7 +168,10 @@ beforeEach(() => {
+   vi.mocked(createGitHubClient).mockReturnValue(mockGitHubClientMethods as never);
+ 
+   vi.mocked(buildContinuityCheckerPrompt).mockReturnValue('mock continuity checker system prompt');
+-  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/continuity-abc');
++  vi.mocked(launchAgentRun).mockResolvedValue({
++    runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++    taskArn: 'arn:aws:ecs:us-east-1:123:task/test/continuity-abc',
++  });
+   vi.mocked(enqueue).mockResolvedValue(undefined);
+ });
+ 
+@@ -221,73 +227,52 @@ describe('CONTINUITY_CHECK — happy path', () => {
+     expect(params.chapterNumber).toBe(1);
+   });
+ 
+-  it('launches continuity-checker ECS task with correct task definition', async () => {
++  it('launches the continuity-checker agent run with correct task definition', async () => {
+     const workItem = { type: 'CONTINUITY_CHECK' as const, projectId: 'proj-123', nodeId: 'node-1' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.taskDefinition).toBe(baseEnv.CONTINUITY_CHECKER_TASK_DEF_ARN);
+-    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
++    expect(vi.mocked(launchAgentRun)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.taskDefArn).toBe(baseEnv.CONTINUITY_CHECKER_TASK_DEF_ARN);
+   });
+ 
+-  it('passes correct environment variables to the ECS task', async () => {
++  it('passes correct project details and extraEnv to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_CHECK' as const, projectId: 'proj-123', nodeId: 'node-1' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['PROJECT_ID']).toBe('proj-123');
+-    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
+-    expect(params.environment['CHAPTER_NUMBER']).toBe('1');
+-    expect(typeof params.environment['RUN_ID']).toBe('string');
+-    expect(params.environment['AWS_REGION']).toBe('us-east-1');
+-    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.projectId).toBe('proj-123');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.extraEnv).toEqual({ CHAPTER_NUMBER: '1' });
++    expect(params.config.AWS_REGION).toBe('us-east-1');
++    expect(params.config.DYNAMODB_TABLE_PREFIX).toBe('test');
+   });
+ 
+-  it('creates an agent run record with workerType continuity-checker and nodeId', async () => {
++  it('passes workerType continuity-checker and nodeId to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_CHECK' as const, projectId: 'proj-123', nodeId: 'node-1' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runItem.projectId).toBe('proj-123');
+-    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/continuity-abc');
+-    expect(runItem.workerType).toBe('continuity-checker');
+-    expect(runItem.nodeId).toBe('node-1');
+-    expect(runItem.status).toBe('RUNNING');
+-    expect(typeof runItem.runId).toBe('string');
+-    expect(runItem.runId.length).toBeGreaterThan(0);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.workerType).toBe('continuity-checker');
++    expect(params.nodeId).toBe('node-1');
+   });
+ 
+-  it('saves the system prompt to the task-outputs table', async () => {
++  it('passes the system prompt and services to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_CHECK' as const, projectId: 'proj-123', nodeId: 'node-1' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(outputItem.projectId).toBe('proj-123');
+-    expect(outputItem.outputType).toBe('system-prompt');
+-    expect(outputItem.content).toBe('mock continuity checker system prompt');
+-    expect(outputItem.contentLength).toBe('mock continuity checker system prompt'.length);
+-  });
+-
+-  it('uses the same runId for agent run and task output records', async () => {
+-    const workItem = { type: 'CONTINUITY_CHECK' as const, projectId: 'proj-123', nodeId: 'node-1' };
+-    const event = makeEvent([makeRecord(workItem)]);
+-
+-    await handler(event, {} as never, () => {});
+-
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(runItem.runId).toBe(outputItem.runId);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.systemPrompt).toBe('mock continuity checker system prompt');
++    expect(params.agentRunService).toBe(mockAgentRunServiceMethods);
++    expect(params.taskOutputService).toBe(mockTaskOutputServiceMethods);
+   });
+ 
+   it('enqueues a RECONCILE work item with the runId', async () => {
+@@ -302,8 +287,7 @@ describe('CONTINUITY_CHECK — happy path', () => {
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+-      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-      expect(enqueuedItem.runId).toBe(runItem.runId);
++      expect(enqueuedItem.runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+     }
+   });
+ 
+@@ -390,7 +374,7 @@ describe('CONTINUITY_CHECK — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when project is not found', async () => {
+@@ -402,7 +386,7 @@ describe('CONTINUITY_CHECK — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when task graph is not found', async () => {
+@@ -414,7 +398,7 @@ describe('CONTINUITY_CHECK — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-graph' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when node is not found in task graph', async () => {
+@@ -426,8 +410,8 @@ describe('CONTINUITY_CHECK — error handling', () => {
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-node' }] });
+   });
+ 
+-  it('returns batch failure when ECS task launch fails', async () => {
+-    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++  it('returns batch failure when launchAgentRun fails', async () => {
++    vi.mocked(launchAgentRun).mockRejectedValueOnce(new Error('ECS error'));
+ 
+     const workItem = { type: 'CONTINUITY_CHECK' as const, projectId: 'proj-123', nodeId: 'node-1' };
+     const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
+@@ -435,36 +419,6 @@ describe('CONTINUITY_CHECK — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
+-  });
+-
+-  // Documenting the current behavior: save runs before launchECSTask, so an
+-  // orphaned system-prompt record is left in DynamoDB when launch fails.
+-  it('saves system-prompt to DynamoDB even when launchECSTask throws (documents orphaned-record behavior)', async () => {
+-    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS launch error'));
+-
+-    const workItem = { type: 'CONTINUITY_CHECK' as const, projectId: 'proj-123', nodeId: 'node-1' };
+-    const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail-save')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail-save' }] });
+-    // save was already called before launchECSTask, leaving an orphaned record
+-    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(outputItem.outputType).toBe('system-prompt');
+-    expect(outputItem.projectId).toBe('proj-123');
+-  });
+-
+-  it('returns batch failure when agent run creation fails', async () => {
+-    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const workItem = { type: 'CONTINUITY_CHECK' as const, projectId: 'proj-123', nodeId: 'node-1' };
+-    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ 
+@@ -487,7 +441,7 @@ describe('CONTINUITY_CHECK — error handling', () => {
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
+     expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
+index d44cd30..1a006a2 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
+@@ -19,7 +19,10 @@ vi.mock('../../shared/index.js', async (importOriginal) => {
+   const actual = await importOriginal<typeof import('../../shared/index.js')>();
+   return {
+     ...actual,
+-    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/fixer-abc'),
++    launchAgentRun: vi.fn().mockResolvedValue({
++      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++      taskArn: 'arn:aws:ecs:us-east-1:123:task/test/fixer-abc',
++    }),
+   };
+ });
+ 
+@@ -32,7 +35,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchAgentRun } from '../../shared/index.js';
+ import { handler } from '../continuity-fixer.js';
+ 
+ const baseEnv = {
+@@ -149,7 +152,10 @@ beforeEach(() => {
+   vi.mocked(TaskOutputService).mockImplementation(() => mockTaskOutputServiceMethods as never);
+ 
+   vi.mocked(buildContinuityFixerPrompt).mockReturnValue('mock fixer system prompt');
+-  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/fixer-abc');
++  vi.mocked(launchAgentRun).mockResolvedValue({
++    runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++    taskArn: 'arn:aws:ecs:us-east-1:123:task/test/fixer-abc',
++  });
+   vi.mocked(enqueue).mockResolvedValue(undefined);
+ });
+ 
+@@ -190,82 +196,61 @@ describe('CONTINUITY_FIX — happy path', () => {
+     expect(params.repoName).toBe('the-dark-tower');
+   });
+ 
+-  it('launches fixer ECS task with correct task definition', async () => {
+-    const workItem = { type: 'CONTINUITY_FIX' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem)]);
+-
+-    await handler(event, {} as never, () => {});
+-
+-    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.taskDefinition).toBe(baseEnv.FIXER_TASK_DEF_ARN);
+-    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
+-  });
+-
+-  it('passes correct environment variables to the ECS task', async () => {
++  it('launches the fixer agent run with correct task definition', async () => {
+     const workItem = { type: 'CONTINUITY_FIX' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['PROJECT_ID']).toBe('proj-123');
+-    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
+-    expect(typeof params.environment['RUN_ID']).toBe('string');
+-    expect(params.environment['AWS_REGION']).toBe('us-east-1');
+-    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++    expect(vi.mocked(launchAgentRun)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.taskDefArn).toBe(baseEnv.FIXER_TASK_DEF_ARN);
+   });
+ 
+-  it('does not pass CHAPTER_NUMBER to the ECS task', async () => {
++  it('passes correct project details to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_FIX' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['CHAPTER_NUMBER']).toBeUndefined();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.projectId).toBe('proj-123');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.config.AWS_REGION).toBe('us-east-1');
++    expect(params.config.DYNAMODB_TABLE_PREFIX).toBe('test');
+   });
+ 
+-  it('creates an agent run record with workerType fixer and no nodeId', async () => {
++  it('does not pass extraEnv to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_FIX' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runItem.projectId).toBe('proj-123');
+-    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/fixer-abc');
+-    expect(runItem.workerType).toBe('fixer');
+-    expect(runItem.nodeId).toBeUndefined();
+-    expect(runItem.status).toBe('RUNNING');
+-    expect(typeof runItem.runId).toBe('string');
+-    expect(runItem.runId.length).toBeGreaterThan(0);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.extraEnv).toBeUndefined();
+   });
+ 
+-  it('saves the system prompt to the task-outputs table', async () => {
++  it('passes workerType fixer and no nodeId to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_FIX' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(outputItem.projectId).toBe('proj-123');
+-    expect(outputItem.outputType).toBe('system-prompt');
+-    expect(outputItem.content).toBe('mock fixer system prompt');
+-    expect(outputItem.contentLength).toBe('mock fixer system prompt'.length);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.workerType).toBe('fixer');
++    expect(params.nodeId).toBeUndefined();
+   });
+ 
+-  it('uses the same runId for agent run and task output records', async () => {
++  it('passes the system prompt and services to launchAgentRun', async () => {
+     const workItem = { type: 'CONTINUITY_FIX' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(runItem.runId).toBe(outputItem.runId);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.systemPrompt).toBe('mock fixer system prompt');
++    expect(params.agentRunService).toBe(mockAgentRunServiceMethods);
++    expect(params.taskOutputService).toBe(mockTaskOutputServiceMethods);
+   });
+ 
+   it('enqueues a RECONCILE work item with the runId', async () => {
+@@ -280,8 +265,7 @@ describe('CONTINUITY_FIX — happy path', () => {
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+-      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-      expect(enqueuedItem.runId).toBe(runItem.runId);
++      expect(enqueuedItem.runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+     }
+   });
+ 
+@@ -309,7 +293,7 @@ describe('CONTINUITY_FIX — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when project is not found', async () => {
+@@ -321,7 +305,7 @@ describe('CONTINUITY_FIX — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when task graph is not found', async () => {
+@@ -333,11 +317,11 @@ describe('CONTINUITY_FIX — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-graph' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+-  it('returns batch failure when ECS task launch fails', async () => {
+-    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++  it('returns batch failure when launchAgentRun fails', async () => {
++    vi.mocked(launchAgentRun).mockRejectedValueOnce(new Error('ECS error'));
+ 
+     const workItem = { type: 'CONTINUITY_FIX' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
+@@ -345,18 +329,6 @@ describe('CONTINUITY_FIX — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
+-  });
+-
+-  it('returns batch failure when agent run creation fails', async () => {
+-    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const workItem = { type: 'CONTINUITY_FIX' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ 
+@@ -379,7 +351,7 @@ describe('CONTINUITY_FIX — error handling', () => {
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
+     expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts b/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
+index 00bce21..4afc7d0 100644
+--- a/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
+@@ -18,7 +18,10 @@ vi.mock('../../shared/index.js', async (importOriginal) => {
+   const actual = await importOriginal<typeof import('../../shared/index.js')>();
+   return {
+     ...actual,
+-    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123'),
++    launchAgentRun: vi.fn().mockResolvedValue({
++      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++      taskArn: 'arn:aws:ecs:us-east-1:123:task/test/abc123',
++    }),
+   };
+ });
+ 
+@@ -30,7 +33,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchAgentRun } from '../../shared/index.js';
+ import { handler } from '../generate-outline.js';
+ 
+ const baseEnv = {
+@@ -126,7 +129,10 @@ beforeEach(() => {
+   vi.mocked(TaskOutputService).mockImplementation(() => mockTaskOutputServiceMethods as never);
+ 
+   vi.mocked(buildOutlinerPrompt).mockReturnValue('mock system prompt');
+-  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123');
++  vi.mocked(launchAgentRun).mockResolvedValue({
++    runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++    taskArn: 'arn:aws:ecs:us-east-1:123:task/test/abc123',
++  });
+   vi.mocked(enqueue).mockResolvedValue(undefined);
+ });
+ 
+@@ -161,71 +167,41 @@ describe('GENERATE_OUTLINE — happy path', () => {
+     expect(params.chapterCount).toBe(25);
+   });
+ 
+-  it('launches an ECS Fargate task with correct parameters', async () => {
+-    const workItem = { type: 'GENERATE_OUTLINE' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem)]);
+-
+-    await handler(event, {} as never, () => {});
+-
+-    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.taskDefinition).toBe(baseEnv.OUTLINER_TASK_DEF_ARN);
+-    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
+-  });
+-
+-  it('passes correct environment variables to the ECS task', async () => {
+-    const workItem = { type: 'GENERATE_OUTLINE' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem)]);
+-
+-    await handler(event, {} as never, () => {});
+-
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['PROJECT_ID']).toBe('proj-123');
+-    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
+-    expect(typeof params.environment['RUN_ID']).toBe('string');
+-    expect(params.environment['AWS_REGION']).toBe('us-east-1');
+-    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
+-  });
+-
+-  it('creates an agent run record with status RUNNING', async () => {
++  it('launches the outliner agent run with correct parameters', async () => {
+     const workItem = { type: 'GENERATE_OUTLINE' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runItem.projectId).toBe('proj-123');
+-    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/abc123');
+-    expect(runItem.workerType).toBe('outliner');
+-    expect(runItem.status).toBe('RUNNING');
+-    expect(typeof runItem.runId).toBe('string');
+-    expect(runItem.runId.length).toBeGreaterThan(0);
++    expect(vi.mocked(launchAgentRun)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.taskDefArn).toBe(baseEnv.OUTLINER_TASK_DEF_ARN);
++    expect(params.workerType).toBe('outliner');
+   });
+ 
+-  it('saves the system prompt to the task-outputs table', async () => {
++  it('passes correct project details to launchAgentRun', async () => {
+     const workItem = { type: 'GENERATE_OUTLINE' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(outputItem.projectId).toBe('proj-123');
+-    expect(outputItem.outputType).toBe('system-prompt');
+-    expect(outputItem.content).toBe('mock system prompt');
+-    expect(outputItem.contentLength).toBe('mock system prompt'.length);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.projectId).toBe('proj-123');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.config.AWS_REGION).toBe('us-east-1');
++    expect(params.config.DYNAMODB_TABLE_PREFIX).toBe('test');
+   });
+ 
+-  it('uses the same runId for agent run and task output records', async () => {
++  it('passes the system prompt and services to launchAgentRun', async () => {
+     const workItem = { type: 'GENERATE_OUTLINE' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(runItem.runId).toBe(outputItem.runId);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.systemPrompt).toBe('mock system prompt');
++    expect(params.agentRunService).toBe(mockAgentRunServiceMethods);
++    expect(params.taskOutputService).toBe(mockTaskOutputServiceMethods);
+   });
+ 
+   it('updates the project status to OUTLINING', async () => {
+@@ -250,8 +226,7 @@ describe('GENERATE_OUTLINE — happy path', () => {
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+-      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-      expect(enqueuedItem.runId).toBe(runItem.runId);
++      expect(enqueuedItem.runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+     }
+   });
+ 
+@@ -279,7 +254,7 @@ describe('error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when project is not found', async () => {
+@@ -291,7 +266,7 @@ describe('error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when DynamoDB get throws', async () => {
+@@ -305,8 +280,8 @@ describe('error handling', () => {
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ddb-fail' }] });
+   });
+ 
+-  it('returns batch failure when ECS task launch fails', async () => {
+-    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++  it('returns batch failure when launchAgentRun fails', async () => {
++    vi.mocked(launchAgentRun).mockRejectedValueOnce(new Error('ECS error'));
+ 
+     const workItem = { type: 'GENERATE_OUTLINE' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
+@@ -314,30 +289,6 @@ describe('error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
+-  });
+-
+-  it('returns batch failure when agent run creation fails', async () => {
+-    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const workItem = { type: 'GENERATE_OUTLINE' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
+-    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+-  });
+-
+-  it('returns batch failure when task output save fails', async () => {
+-    mockTaskOutputServiceMethods.save.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const workItem = { type: 'GENERATE_OUTLINE' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem, 'msg-output-fail')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-output-fail' }] });
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ 
+@@ -372,7 +323,7 @@ describe('error handling', () => {
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
+     expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts b/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts
+index 18244f4..7237052 100644
+--- a/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/package-manuscript.test.ts
+@@ -18,7 +18,10 @@ vi.mock('../../shared/index.js', async (importOriginal) => {
+   const actual = await importOriginal<typeof import('../../shared/index.js')>();
+   return {
+     ...actual,
+-    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/packager-abc'),
++    launchAgentRun: vi.fn().mockResolvedValue({
++      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++      taskArn: 'arn:aws:ecs:us-east-1:123:task/test/packager-abc',
++    }),
+   };
+ });
+ 
+@@ -30,7 +33,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchAgentRun } from '../../shared/index.js';
+ import { handler } from '../package-manuscript.js';
+ 
+ const baseEnv = {
+@@ -126,7 +129,10 @@ beforeEach(() => {
+   vi.mocked(TaskOutputService).mockImplementation(() => mockTaskOutputServiceMethods as never);
+ 
+   vi.mocked(buildPackagerPrompt).mockReturnValue('mock packager system prompt');
+-  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/packager-abc');
++  vi.mocked(launchAgentRun).mockResolvedValue({
++    runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++    taskArn: 'arn:aws:ecs:us-east-1:123:task/test/packager-abc',
++  });
+   vi.mocked(enqueue).mockResolvedValue(undefined);
+ });
+ 
+@@ -159,72 +165,51 @@ describe('PACKAGE_MANUSCRIPT — happy path', () => {
+     expect(params.projectType).toBe(ProjectType.NOVEL);
+   });
+ 
+-  it('launches packager ECS task with correct task definition', async () => {
+-    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem)]);
+-
+-    await handler(event, {} as never, () => {});
+-
+-    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.taskDefinition).toBe(baseEnv.PACKAGER_TASK_DEF_ARN);
+-    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
+-  });
+-
+-  it('passes correct environment variables to the ECS task', async () => {
++  it('launches the packager agent run with correct task definition', async () => {
+     const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['PROJECT_ID']).toBe('proj-123');
+-    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
+-    expect(typeof params.environment['RUN_ID']).toBe('string');
+-    expect(params.environment['AWS_REGION']).toBe('us-east-1');
+-    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++    expect(vi.mocked(launchAgentRun)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.taskDefArn).toBe(baseEnv.PACKAGER_TASK_DEF_ARN);
+   });
+ 
+-  it('creates an agent run record with workerType packager and no nodeId', async () => {
++  it('passes correct project details to launchAgentRun', async () => {
+     const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runItem.projectId).toBe('proj-123');
+-    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/packager-abc');
+-    expect(runItem.workerType).toBe('packager');
+-    expect(runItem.nodeId).toBeUndefined();
+-    expect(runItem.status).toBe('RUNNING');
+-    expect(typeof runItem.runId).toBe('string');
+-    expect(runItem.runId.length).toBeGreaterThan(0);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.projectId).toBe('proj-123');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.config.AWS_REGION).toBe('us-east-1');
++    expect(params.config.DYNAMODB_TABLE_PREFIX).toBe('test');
+   });
+ 
+-  it('saves the system prompt to the task-outputs table', async () => {
++  it('passes workerType packager and no nodeId to launchAgentRun', async () => {
+     const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(outputItem.projectId).toBe('proj-123');
+-    expect(outputItem.outputType).toBe('system-prompt');
+-    expect(outputItem.content).toBe('mock packager system prompt');
+-    expect(outputItem.contentLength).toBe('mock packager system prompt'.length);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.workerType).toBe('packager');
++    expect(params.nodeId).toBeUndefined();
+   });
+ 
+-  it('uses the same runId for agent run and task output records', async () => {
++  it('passes the system prompt and services to launchAgentRun', async () => {
+     const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(runItem.runId).toBe(outputItem.runId);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.systemPrompt).toBe('mock packager system prompt');
++    expect(params.agentRunService).toBe(mockAgentRunServiceMethods);
++    expect(params.taskOutputService).toBe(mockTaskOutputServiceMethods);
+   });
+ 
+   it('sets the project status to PACKAGING', async () => {
+@@ -248,8 +233,7 @@ describe('PACKAGE_MANUSCRIPT — happy path', () => {
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+-      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-      expect(enqueuedItem.runId).toBe(runItem.runId);
++      expect(enqueuedItem.runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+     }
+   });
+ 
+@@ -277,7 +261,7 @@ describe('PACKAGE_MANUSCRIPT — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when project is not found', async () => {
+@@ -289,11 +273,11 @@ describe('PACKAGE_MANUSCRIPT — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+-  it('returns batch failure when ECS task launch fails', async () => {
+-    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++  it('returns batch failure when launchAgentRun fails', async () => {
++    vi.mocked(launchAgentRun).mockRejectedValueOnce(new Error('ECS error'));
+ 
+     const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
+@@ -301,18 +285,6 @@ describe('PACKAGE_MANUSCRIPT — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
+-  });
+-
+-  it('returns batch failure when agent run creation fails', async () => {
+-    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const workItem = { type: 'PACKAGE_MANUSCRIPT' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ 
+@@ -335,7 +307,7 @@ describe('PACKAGE_MANUSCRIPT — error handling', () => {
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
+     expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts b/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
+index c3870b8..07394f9 100644
+--- a/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
+@@ -18,7 +18,10 @@ vi.mock('../../shared/index.js', async (importOriginal) => {
+   const actual = await importOriginal<typeof import('../../shared/index.js')>();
+   return {
+     ...actual,
+-    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123'),
++    launchAgentRun: vi.fn().mockResolvedValue({
++      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++      taskArn: 'arn:aws:ecs:us-east-1:123:task/test/abc123',
++    }),
+   };
+ });
+ 
+@@ -30,7 +33,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchAgentRun } from '../../shared/index.js';
+ import { handler } from '../plan-chapters.js';
+ 
+ const baseEnv = {
+@@ -126,7 +129,10 @@ beforeEach(() => {
+   vi.mocked(TaskOutputService).mockImplementation(() => mockTaskOutputServiceMethods as never);
+ 
+   vi.mocked(buildPlannerPrompt).mockReturnValue('mock planner system prompt');
+-  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123');
++  vi.mocked(launchAgentRun).mockResolvedValue({
++    runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++    taskArn: 'arn:aws:ecs:us-east-1:123:task/test/abc123',
++  });
+   vi.mocked(enqueue).mockResolvedValue(undefined);
+ });
+ 
+@@ -156,71 +162,41 @@ describe('PLAN_CHAPTERS — happy path', () => {
+     expect(params.chapterCount).toBe(25);
+   });
+ 
+-  it('launches an ECS Fargate task with the planner task definition', async () => {
+-    const workItem = { type: 'PLAN_CHAPTERS' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem)]);
+-
+-    await handler(event, {} as never, () => {});
+-
+-    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.taskDefinition).toBe(baseEnv.PLANNER_TASK_DEF_ARN);
+-    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
+-  });
+-
+-  it('passes correct environment variables to the ECS task', async () => {
+-    const workItem = { type: 'PLAN_CHAPTERS' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem)]);
+-
+-    await handler(event, {} as never, () => {});
+-
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['PROJECT_ID']).toBe('proj-123');
+-    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
+-    expect(typeof params.environment['RUN_ID']).toBe('string');
+-    expect(params.environment['AWS_REGION']).toBe('us-east-1');
+-    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
+-  });
+-
+-  it('creates an agent run record with workerType planner and status RUNNING', async () => {
++  it('launches the planner agent run with the planner task definition', async () => {
+     const workItem = { type: 'PLAN_CHAPTERS' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runItem.projectId).toBe('proj-123');
+-    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/abc123');
+-    expect(runItem.workerType).toBe('planner');
+-    expect(runItem.status).toBe('RUNNING');
+-    expect(typeof runItem.runId).toBe('string');
+-    expect(runItem.runId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
++    expect(vi.mocked(launchAgentRun)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.taskDefArn).toBe(baseEnv.PLANNER_TASK_DEF_ARN);
++    expect(params.workerType).toBe('planner');
+   });
+ 
+-  it('saves the system prompt to the task-outputs table', async () => {
++  it('passes correct project details to launchAgentRun', async () => {
+     const workItem = { type: 'PLAN_CHAPTERS' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(outputItem.projectId).toBe('proj-123');
+-    expect(outputItem.outputType).toBe('system-prompt');
+-    expect(outputItem.content).toBe('mock planner system prompt');
+-    expect(outputItem.contentLength).toBe('mock planner system prompt'.length);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.projectId).toBe('proj-123');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.config.AWS_REGION).toBe('us-east-1');
++    expect(params.config.DYNAMODB_TABLE_PREFIX).toBe('test');
+   });
+ 
+-  it('uses the same runId for agent run and task output records', async () => {
++  it('passes the system prompt and services to launchAgentRun', async () => {
+     const workItem = { type: 'PLAN_CHAPTERS' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(runItem.runId).toBe(outputItem.runId);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.systemPrompt).toBe('mock planner system prompt');
++    expect(params.agentRunService).toBe(mockAgentRunServiceMethods);
++    expect(params.taskOutputService).toBe(mockTaskOutputServiceMethods);
+   });
+ 
+   it('updates the project status to PLANNING', async () => {
+@@ -245,8 +221,7 @@ describe('PLAN_CHAPTERS — happy path', () => {
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+-      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-      expect(enqueuedItem.runId).toBe(runItem.runId);
++      expect(enqueuedItem.runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+     }
+   });
+ 
+@@ -274,7 +249,7 @@ describe('error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when project is not found', async () => {
+@@ -286,7 +261,7 @@ describe('error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when DynamoDB get throws', async () => {
+@@ -300,8 +275,8 @@ describe('error handling', () => {
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ddb-fail' }] });
+   });
+ 
+-  it('returns batch failure when ECS task launch fails', async () => {
+-    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++  it('returns batch failure when launchAgentRun fails', async () => {
++    vi.mocked(launchAgentRun).mockRejectedValueOnce(new Error('ECS error'));
+ 
+     const workItem = { type: 'PLAN_CHAPTERS' as const, projectId: 'proj-123' };
+     const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
+@@ -309,30 +284,6 @@ describe('error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
+-  });
+-
+-  it('returns batch failure when agent run creation fails', async () => {
+-    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const workItem = { type: 'PLAN_CHAPTERS' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
+-    expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+-  });
+-
+-  it('returns batch failure when task output save fails', async () => {
+-    mockTaskOutputServiceMethods.save.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const workItem = { type: 'PLAN_CHAPTERS' as const, projectId: 'proj-123' };
+-    const event = makeEvent([makeRecord(workItem, 'msg-output-fail')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-output-fail' }] });
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ 
+@@ -367,7 +318,7 @@ describe('error handling', () => {
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
+     expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+index d2fdf18..29f8078 100644
+--- a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+@@ -20,7 +20,10 @@ vi.mock('../../shared/index.js', async (importOriginal) => {
+   const actual = await importOriginal<typeof import('../../shared/index.js')>();
+   return {
+     ...actual,
+-    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/editor-abc'),
++    launchAgentRun: vi.fn().mockResolvedValue({
++      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++      taskArn: 'arn:aws:ecs:us-east-1:123:task/test/editor-abc',
++    }),
+   };
+ });
+ 
+@@ -34,7 +37,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchAgentRun } from '../../shared/index.js';
+ import { handler } from '../review-chapter.js';
+ 
+ const baseEnv = {
+@@ -167,7 +170,10 @@ beforeEach(() => {
+   vi.mocked(createGitHubClient).mockReturnValue(mockGitHubClientMethods as never);
+ 
+   vi.mocked(buildEditorPrompt).mockReturnValue('mock editor system prompt');
+-  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/editor-abc');
++  vi.mocked(launchAgentRun).mockResolvedValue({
++    runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++    taskArn: 'arn:aws:ecs:us-east-1:123:task/test/editor-abc',
++  });
+   vi.mocked(enqueue).mockResolvedValue(undefined);
+ });
+ 
+@@ -321,75 +327,56 @@ describe('REVIEW_CHAPTER — happy path', () => {
+     });
+   });
+ 
+-  it('launches editor ECS task with correct task definition', async () => {
+-    const workItem = { type: 'REVIEW_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', prNumber: 42 };
+-    const event = makeEvent([makeRecord(workItem)]);
+-
+-    await handler(event, {} as never, () => {});
+-
+-    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.taskDefinition).toBe(baseEnv.EDITOR_TASK_DEF_ARN);
+-    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
+-  });
+-
+-  it('passes correct environment variables to the ECS task', async () => {
++  it('launches the editor agent run with correct task definition', async () => {
+     const workItem = { type: 'REVIEW_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', prNumber: 42 };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['PROJECT_ID']).toBe('proj-123');
+-    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
+-    expect(params.environment['CHAPTER_NUMBER']).toBe('1');
+-    expect(params.environment['BRANCH_NAME']).toBe('chapter-01');
+-    expect(params.environment['PR_NUMBER']).toBe('42');
+-    expect(typeof params.environment['RUN_ID']).toBe('string');
+-    expect(params.environment['AWS_REGION']).toBe('us-east-1');
+-    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++    expect(vi.mocked(launchAgentRun)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.taskDefArn).toBe(baseEnv.EDITOR_TASK_DEF_ARN);
+   });
+ 
+-  it('creates an agent run record with workerType editor and nodeId', async () => {
++  it('passes correct project details and extraEnv to launchAgentRun', async () => {
+     const workItem = { type: 'REVIEW_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', prNumber: 42 };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runItem.projectId).toBe('proj-123');
+-    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/editor-abc');
+-    expect(runItem.workerType).toBe('editor');
+-    expect(runItem.nodeId).toBe('node-1');
+-    expect(runItem.status).toBe('RUNNING');
+-    expect(typeof runItem.runId).toBe('string');
+-    expect(runItem.runId.length).toBeGreaterThan(0);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.projectId).toBe('proj-123');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.extraEnv).toEqual({
++      CHAPTER_NUMBER: '1',
++      BRANCH_NAME: 'chapter-01',
++      PR_NUMBER: '42',
++    });
++    expect(params.config.AWS_REGION).toBe('us-east-1');
++    expect(params.config.DYNAMODB_TABLE_PREFIX).toBe('test');
+   });
+ 
+-  it('saves the system prompt to the task-outputs table', async () => {
++  it('passes workerType editor and nodeId to launchAgentRun', async () => {
+     const workItem = { type: 'REVIEW_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', prNumber: 42 };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(outputItem.projectId).toBe('proj-123');
+-    expect(outputItem.outputType).toBe('system-prompt');
+-    expect(outputItem.content).toBe('mock editor system prompt');
+-    expect(outputItem.contentLength).toBe('mock editor system prompt'.length);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.workerType).toBe('editor');
++    expect(params.nodeId).toBe('node-1');
+   });
+ 
+-  it('uses the same runId for agent run and task output records', async () => {
++  it('passes the system prompt and services to launchAgentRun', async () => {
+     const workItem = { type: 'REVIEW_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', prNumber: 42 };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(runItem.runId).toBe(outputItem.runId);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.systemPrompt).toBe('mock editor system prompt');
++    expect(params.agentRunService).toBe(mockAgentRunServiceMethods);
++    expect(params.taskOutputService).toBe(mockTaskOutputServiceMethods);
+   });
+ 
+   it('updates the node status to REVIEWING with the runId', async () => {
+@@ -404,8 +391,7 @@ describe('REVIEW_CHAPTER — happy path', () => {
+     expect(version).toBe(1);
+     expect(nid).toBe('node-1');
+     expect(status).toBe('REVIEWING');
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runId).toBe(runItem.runId);
++    expect(runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+   });
+ 
+   it('enqueues a RECONCILE work item with the runId', async () => {
+@@ -420,8 +406,7 @@ describe('REVIEW_CHAPTER — happy path', () => {
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+-      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-      expect(enqueuedItem.runId).toBe(runItem.runId);
++      expect(enqueuedItem.runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+     }
+   });
+ 
+@@ -449,7 +434,7 @@ describe('REVIEW_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when project is not found', async () => {
+@@ -461,7 +446,7 @@ describe('REVIEW_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when task graph is not found', async () => {
+@@ -473,7 +458,7 @@ describe('REVIEW_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-graph' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when node is not found in task graph', async () => {
+@@ -485,8 +470,8 @@ describe('REVIEW_CHAPTER — error handling', () => {
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-node' }] });
+   });
+ 
+-  it('returns batch failure when ECS task launch fails', async () => {
+-    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++  it('returns batch failure when launchAgentRun fails', async () => {
++    vi.mocked(launchAgentRun).mockRejectedValueOnce(new Error('ECS error'));
+ 
+     const workItem = { type: 'REVIEW_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', prNumber: 42 };
+     const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
+@@ -494,18 +479,6 @@ describe('REVIEW_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
+-  });
+-
+-  it('returns batch failure when agent run creation fails', async () => {
+-    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const workItem = { type: 'REVIEW_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', prNumber: 42 };
+-    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
+     expect(mockTaskGraphServiceMethods.updateNodeStatus).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+@@ -541,7 +514,7 @@ describe('REVIEW_CHAPTER — error handling', () => {
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
+     expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
+index c168b2c..b46cd2b 100644
+--- a/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
+@@ -21,7 +21,10 @@ vi.mock('../../shared/index.js', async (importOriginal) => {
+   const actual = await importOriginal<typeof import('../../shared/index.js')>();
+   return {
+     ...actual,
+-    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/reviser-abc'),
++    launchAgentRun: vi.fn().mockResolvedValue({
++      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++      taskArn: 'arn:aws:ecs:us-east-1:123:task/test/reviser-abc',
++    }),
+   };
+ });
+ 
+@@ -36,7 +39,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchAgentRun } from '../../shared/index.js';
+ import { handler } from '../revise-chapter.js';
+ 
+ const baseEnv = {
+@@ -176,7 +179,10 @@ beforeEach(() => {
+   vi.mocked(createGitHubClient).mockReturnValue(mockGitHubClientMethods as never);
+ 
+   vi.mocked(buildReviserPrompt).mockReturnValue('mock reviser system prompt');
+-  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/reviser-abc');
++  vi.mocked(launchAgentRun).mockResolvedValue({
++    runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++    taskArn: 'arn:aws:ecs:us-east-1:123:task/test/reviser-abc',
++  });
+   vi.mocked(enqueue).mockResolvedValue(undefined);
+ });
+ 
+@@ -229,65 +235,48 @@ describe('REVISE_CHAPTER — normal revision', () => {
+     expect(mockRepoLockServiceMethods.acquire).toHaveBeenCalledWith('the-dark-tower', 'reviser-node-1');
+   });
+ 
+-  it('launches reviser ECS task with correct task definition', async () => {
++  it('launches the reviser agent run with correct task definition', async () => {
+     const event = makeEvent([makeRecord(workItem)]);
+     await handler(event, {} as never, () => {});
+ 
+-    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.taskDefinition).toBe(baseEnv.REVISER_TASK_DEF_ARN);
+-    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
++    expect(vi.mocked(launchAgentRun)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.taskDefArn).toBe(baseEnv.REVISER_TASK_DEF_ARN);
+   });
+ 
+-  it('passes correct environment variables to the ECS task', async () => {
++  it('passes correct project details and extraEnv to launchAgentRun', async () => {
+     const event = makeEvent([makeRecord(workItem)]);
+     await handler(event, {} as never, () => {});
+ 
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['PROJECT_ID']).toBe('proj-123');
+-    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
+-    expect(params.environment['CHAPTER_NUMBER']).toBe('1');
+-    expect(params.environment['BRANCH_NAME']).toBe('chapter-01');
+-    expect(params.environment['PR_NUMBER']).toBe('42');
+-    expect(typeof params.environment['RUN_ID']).toBe('string');
+-    expect(params.environment['AWS_REGION']).toBe('us-east-1');
+-    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.projectId).toBe('proj-123');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.extraEnv).toEqual({
++      CHAPTER_NUMBER: '1',
++      BRANCH_NAME: 'chapter-01',
++      PR_NUMBER: '42',
++    });
++    expect(params.config.AWS_REGION).toBe('us-east-1');
++    expect(params.config.DYNAMODB_TABLE_PREFIX).toBe('test');
+   });
+ 
+-  it('creates an agent run record with workerType reviser and nodeId', async () => {
++  it('passes workerType reviser and nodeId to launchAgentRun', async () => {
+     const event = makeEvent([makeRecord(workItem)]);
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runItem.projectId).toBe('proj-123');
+-    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/reviser-abc');
+-    expect(runItem.workerType).toBe('reviser');
+-    expect(runItem.nodeId).toBe('node-1');
+-    expect(runItem.status).toBe('RUNNING');
+-    expect(typeof runItem.runId).toBe('string');
+-    expect(runItem.runId.length).toBeGreaterThan(0);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.workerType).toBe('reviser');
++    expect(params.nodeId).toBe('node-1');
+   });
+ 
+-  it('saves the system prompt to the task-outputs table', async () => {
++  it('passes the system prompt and services to launchAgentRun', async () => {
+     const event = makeEvent([makeRecord(workItem)]);
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(outputItem.projectId).toBe('proj-123');
+-    expect(outputItem.outputType).toBe('system-prompt');
+-    expect(outputItem.content).toBe('mock reviser system prompt');
+-    expect(outputItem.contentLength).toBe('mock reviser system prompt'.length);
+-  });
+-
+-  it('uses the same runId for agent run and task output records', async () => {
+-    const event = makeEvent([makeRecord(workItem)]);
+-    await handler(event, {} as never, () => {});
+-
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(runItem.runId).toBe(outputItem.runId);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.systemPrompt).toBe('mock reviser system prompt');
++    expect(params.agentRunService).toBe(mockAgentRunServiceMethods);
++    expect(params.taskOutputService).toBe(mockTaskOutputServiceMethods);
+   });
+ 
+   it('updates the node status to REVISING with the runId and revisionRound', async () => {
+@@ -302,8 +291,7 @@ describe('REVISE_CHAPTER — normal revision', () => {
+     expect(nid).toBe('node-1');
+     expect(status).toBe('REVISING');
+     expect(round).toBe(1);
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runId).toBe(runItem.runId);
++    expect(runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+   });
+ 
+   it('enqueues a RECONCILE work item with the runId', async () => {
+@@ -316,8 +304,7 @@ describe('REVISE_CHAPTER — normal revision', () => {
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+-      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-      expect(enqueuedItem.runId).toBe(runItem.runId);
++      expect(enqueuedItem.runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+     }
+   });
+ 
+@@ -384,16 +371,10 @@ describe('REVISE_CHAPTER — max-rounds escalation', () => {
+     expect(status).toBe('FAILED');
+   });
+ 
+-  it('does not launch ECS task on escalation', async () => {
++  it('does not launch an agent run on escalation', async () => {
+     const event = makeEvent([makeRecord(escalationWorkItem)]);
+     await handler(event, {} as never, () => {});
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
+-  });
+-
+-  it('does not create agent run record on escalation', async () => {
+-    const event = makeEvent([makeRecord(escalationWorkItem)]);
+-    await handler(event, {} as never, () => {});
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('does not enqueue RECONCILE on escalation', async () => {
+@@ -418,7 +399,7 @@ describe('REVISE_CHAPTER — max-rounds escalation', () => {
+     await handler(event, {} as never, () => {});
+ 
+     expect(mockGitHubClientMethods.addPRComment).not.toHaveBeenCalled();
+-    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
++    expect(vi.mocked(launchAgentRun)).toHaveBeenCalledOnce();
+   });
+ });
+ 
+@@ -442,7 +423,7 @@ describe('REVISE_CHAPTER — lock contention', () => {
+     const event = makeEvent([makeRecord(workItem)]);
+     await handler(event, {} as never, () => {});
+ 
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+     const [, enqueuedItem, enqueueOptions] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('REVISE_CHAPTER');
+@@ -505,7 +486,7 @@ describe('REVISE_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when project is not found', async () => {
+@@ -515,7 +496,7 @@ describe('REVISE_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when task graph is not found', async () => {
+@@ -525,7 +506,7 @@ describe('REVISE_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-graph' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when node is not found in task graph', async () => {
+@@ -535,23 +516,13 @@ describe('REVISE_CHAPTER — error handling', () => {
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-node' }] });
+   });
+ 
+-  it('returns batch failure when ECS task launch fails', async () => {
+-    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++  it('returns batch failure when launchAgentRun fails', async () => {
++    vi.mocked(launchAgentRun).mockRejectedValueOnce(new Error('ECS error'));
+ 
+     const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
+-  });
+-
+-  it('returns batch failure when agent run creation fails', async () => {
+-    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
+     expect(mockTaskGraphServiceMethods.updateNodeStatus).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+@@ -583,7 +554,7 @@ describe('REVISE_CHAPTER — error handling', () => {
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
+     expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+index 0b044fb..2c4b266 100644
+--- a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+@@ -21,7 +21,10 @@ vi.mock('../../shared/index.js', async (importOriginal) => {
+   const actual = await importOriginal<typeof import('../../shared/index.js')>();
+   return {
+     ...actual,
+-    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/writer-abc'),
++    launchAgentRun: vi.fn().mockResolvedValue({
++      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++      taskArn: 'arn:aws:ecs:us-east-1:123:task/test/writer-abc',
++    }),
+   };
+ });
+ 
+@@ -36,7 +39,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchAgentRun } from '../../shared/index.js';
+ import { handler } from '../trigger-chapter.js';
+ 
+ const baseEnv = {
+@@ -188,7 +191,10 @@ beforeEach(() => {
+   vi.mocked(createGitHubClient).mockReturnValue(mockGitHubClientMethods as never);
+ 
+   vi.mocked(buildWriterPrompt).mockReturnValue('mock writer system prompt');
+-  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/writer-abc');
++  vi.mocked(launchAgentRun).mockResolvedValue({
++    runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
++    taskArn: 'arn:aws:ecs:us-east-1:123:task/test/writer-abc',
++  });
+   vi.mocked(enqueue).mockResolvedValue(undefined);
+ });
+ 
+@@ -377,7 +383,7 @@ describe('TRIGGER_CHAPTER — happy path', () => {
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).toHaveBeenCalledOnce();
+     const [, enqueuedItem, enqueueOptions] = vi.mocked(enqueue).mock.calls[0]!;
+     expect(enqueuedItem.type).toBe('TRIGGER_CHAPTER');
+@@ -389,7 +395,7 @@ describe('TRIGGER_CHAPTER — happy path', () => {
+     expect(enqueueOptions).toMatchObject({ delaySeconds: 60 });
+   });
+ 
+-  it('does not create agent run record when lock acquisition fails', async () => {
++  it('does not launch an agent run when lock acquisition fails', async () => {
+     mockRepoLockServiceMethods.acquire.mockResolvedValueOnce(false);
+ 
+     const workItem = { type: 'TRIGGER_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', chapterNumber: 1 };
+@@ -397,77 +403,59 @@ describe('TRIGGER_CHAPTER — happy path', () => {
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
+-  });
+-
+-  it('launches writer ECS task with correct task definition', async () => {
+-    const workItem = { type: 'TRIGGER_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', chapterNumber: 1 };
+-    const event = makeEvent([makeRecord(workItem)]);
+-
+-    await handler(event, {} as never, () => {});
+-
+-    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.taskDefinition).toBe(baseEnv.WRITER_TASK_DEF_ARN);
+-    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+-  it('passes correct environment variables to the ECS task', async () => {
++  it('launches the writer agent run with correct task definition', async () => {
+     const workItem = { type: 'TRIGGER_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', chapterNumber: 1 };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
+-    expect(params.environment['PROJECT_ID']).toBe('proj-123');
+-    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
+-    expect(params.environment['CHAPTER_NUMBER']).toBe('1');
+-    expect(params.environment['BRANCH_NAME']).toBe('chapter-01');
+-    expect(typeof params.environment['RUN_ID']).toBe('string');
+-    expect(params.environment['AWS_REGION']).toBe('us-east-1');
+-    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++    expect(vi.mocked(launchAgentRun)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.taskDefArn).toBe(baseEnv.WRITER_TASK_DEF_ARN);
+   });
+ 
+-  it('creates an agent run record with workerType writer and nodeId', async () => {
++  it('passes correct project details and extraEnv to launchAgentRun', async () => {
+     const workItem = { type: 'TRIGGER_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', chapterNumber: 1 };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockAgentRunServiceMethods.create).toHaveBeenCalledOnce();
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runItem.projectId).toBe('proj-123');
+-    expect(runItem.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/writer-abc');
+-    expect(runItem.workerType).toBe('writer');
+-    expect(runItem.nodeId).toBe('node-1');
+-    expect(runItem.status).toBe('RUNNING');
+-    expect(typeof runItem.runId).toBe('string');
+-    expect(runItem.runId.length).toBeGreaterThan(0);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.projectId).toBe('proj-123');
++    expect(params.repoName).toBe('the-dark-tower');
++    expect(params.extraEnv).toEqual({
++      CHAPTER_NUMBER: '1',
++      BRANCH_NAME: 'chapter-01',
++      ISSUE_NUMBER: '',
++    });
++    expect(params.config.AWS_REGION).toBe('us-east-1');
++    expect(params.config.DYNAMODB_TABLE_PREFIX).toBe('test');
+   });
+ 
+-  it('saves the system prompt to the task-outputs table', async () => {
++  it('passes workerType writer and nodeId to launchAgentRun', async () => {
+     const workItem = { type: 'TRIGGER_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', chapterNumber: 1 };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    expect(mockTaskOutputServiceMethods.save).toHaveBeenCalledOnce();
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(outputItem.projectId).toBe('proj-123');
+-    expect(outputItem.outputType).toBe('system-prompt');
+-    expect(outputItem.content).toBe('mock writer system prompt');
+-    expect(outputItem.contentLength).toBe('mock writer system prompt'.length);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.workerType).toBe('writer');
++    expect(params.nodeId).toBe('node-1');
+   });
+ 
+-  it('uses the same runId for agent run and task output records', async () => {
++  it('passes the system prompt and services to launchAgentRun', async () => {
+     const workItem = { type: 'TRIGGER_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', chapterNumber: 1 };
+     const event = makeEvent([makeRecord(workItem)]);
+ 
+     await handler(event, {} as never, () => {});
+ 
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    const [outputItem] = mockTaskOutputServiceMethods.save.mock.calls[0]!;
+-    expect(runItem.runId).toBe(outputItem.runId);
++    const [params] = vi.mocked(launchAgentRun).mock.calls[0]!;
++    expect(params.systemPrompt).toBe('mock writer system prompt');
++    expect(params.agentRunService).toBe(mockAgentRunServiceMethods);
++    expect(params.taskOutputService).toBe(mockTaskOutputServiceMethods);
+   });
+ 
+   it('updates the node status to WRITING with the runId', async () => {
+@@ -482,8 +470,7 @@ describe('TRIGGER_CHAPTER — happy path', () => {
+     expect(version).toBe(1);
+     expect(nid).toBe('node-1');
+     expect(status).toBe('WRITING');
+-    const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-    expect(runId).toBe(runItem.runId);
++    expect(runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+   });
+ 
+   it('enqueues a RECONCILE work item with the runId', async () => {
+@@ -498,8 +485,7 @@ describe('TRIGGER_CHAPTER — happy path', () => {
+     expect(enqueuedItem.type).toBe('RECONCILE');
+     if (enqueuedItem.type === 'RECONCILE') {
+       expect(enqueuedItem.projectId).toBe('proj-123');
+-      const [runItem] = mockAgentRunServiceMethods.create.mock.calls[0]!;
+-      expect(enqueuedItem.runId).toBe(runItem.runId);
++      expect(enqueuedItem.runId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+     }
+   });
+ 
+@@ -527,7 +513,7 @@ describe('TRIGGER_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-arn' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when project is not found', async () => {
+@@ -539,7 +525,7 @@ describe('TRIGGER_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-missing' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when task graph is not found', async () => {
+@@ -551,7 +537,7 @@ describe('TRIGGER_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-no-graph' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+   it('returns batch failure when node is not found in task graph', async () => {
+@@ -572,11 +558,11 @@ describe('TRIGGER_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-gh-fail' }] });
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+   });
+ 
+-  it('returns batch failure when ECS task launch fails', async () => {
+-    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS error'));
++  it('returns batch failure when launchAgentRun fails', async () => {
++    vi.mocked(launchAgentRun).mockRejectedValueOnce(new Error('ECS error'));
+ 
+     const workItem = { type: 'TRIGGER_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', chapterNumber: 1 };
+     const event = makeEvent([makeRecord(workItem, 'msg-ecs-fail')]);
+@@ -584,18 +570,6 @@ describe('TRIGGER_CHAPTER — error handling', () => {
+     const result = await handler(event, {} as never, () => {});
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-ecs-fail' }] });
+-    expect(mockAgentRunServiceMethods.create).not.toHaveBeenCalled();
+-  });
+-
+-  it('returns batch failure when agent run creation fails', async () => {
+-    mockAgentRunServiceMethods.create.mockRejectedValueOnce(new Error('DynamoDB write error'));
+-
+-    const workItem = { type: 'TRIGGER_CHAPTER' as const, projectId: 'proj-123', nodeId: 'node-1', chapterNumber: 1 };
+-    const event = makeEvent([makeRecord(workItem, 'msg-run-fail')]);
+-
+-    const result = await handler(event, {} as never, () => {});
+-
+-    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-run-fail' }] });
+     expect(mockTaskGraphServiceMethods.updateNodeStatus).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+@@ -631,7 +605,7 @@ describe('TRIGGER_CHAPTER — error handling', () => {
+ 
+     expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: 'msg-1' }] });
+     expect(mockProjectServiceMethods.get).not.toHaveBeenCalled();
+-    expect(vi.mocked(launchECSTask)).not.toHaveBeenCalled();
++    expect(vi.mocked(launchAgentRun)).not.toHaveBeenCalled();
+     expect(vi.mocked(enqueue)).not.toHaveBeenCalled();
+   });
+ });
+diff --git a/packages/lambdas/src/handlers/continuity-audit.ts b/packages/lambdas/src/handlers/continuity-audit.ts
+index 419240e..f5c46da 100644
+--- a/packages/lambdas/src/handlers/continuity-audit.ts
++++ b/packages/lambdas/src/handlers/continuity-audit.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,7 +8,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -51,41 +50,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: auditorTaskDefArn,
++    workerType: 'auditor',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: auditorTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'auditor',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/continuity-check.ts b/packages/lambdas/src/handlers/continuity-check.ts
+index d3db2a5..72598c1 100644
+--- a/packages/lambdas/src/handlers/continuity-check.ts
++++ b/packages/lambdas/src/handlers/continuity-check.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -10,7 +9,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -78,43 +77,19 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: continuityCheckerTaskDefArn,
++    workerType: 'continuity-checker',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: continuityCheckerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'continuity-checker',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/continuity-fixer.ts b/packages/lambdas/src/handlers/continuity-fixer.ts
+index a9e6fab..d034eef 100644
+--- a/packages/lambdas/src/handlers/continuity-fixer.ts
++++ b/packages/lambdas/src/handlers/continuity-fixer.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,7 +8,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -51,41 +50,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: fixerTaskDefArn,
++    workerType: 'fixer',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: fixerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'fixer',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/generate-outline.ts b/packages/lambdas/src/handlers/generate-outline.ts
+index 0e09b62..ffdc50b 100644
+--- a/packages/lambdas/src/handlers/generate-outline.ts
++++ b/packages/lambdas/src/handlers/generate-outline.ts
+@@ -1,4 +1,3 @@
+-import { randomUUID } from 'node:crypto';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,7 +7,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -46,41 +45,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     series: project.config.series,
+   });
+ 
+-  const runId = randomUUID();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: outlinerTaskDefArn,
++    workerType: 'outliner',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: outlinerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'outliner',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await projectService.updateStatus(projectId, 'OUTLINING');
+diff --git a/packages/lambdas/src/handlers/package-manuscript.ts b/packages/lambdas/src/handlers/package-manuscript.ts
+index 13ca3eb..5bab688 100644
+--- a/packages/lambdas/src/handlers/package-manuscript.ts
++++ b/packages/lambdas/src/handlers/package-manuscript.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,7 +7,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -42,41 +41,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     projectType: project.config.projectType,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: packagerTaskDefArn,
++    workerType: 'packager',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: packagerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'packager',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await projectService.updateStatus(projectId, 'PACKAGING');
+diff --git a/packages/lambdas/src/handlers/plan-chapters.ts b/packages/lambdas/src/handlers/plan-chapters.ts
+index 3b6f5e8..e15dea7 100644
+--- a/packages/lambdas/src/handlers/plan-chapters.ts
++++ b/packages/lambdas/src/handlers/plan-chapters.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,7 +7,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -40,41 +39,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     projectType: project.config.projectType,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: plannerTaskDefArn,
++    workerType: 'planner',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: plannerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'planner',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await projectService.updateStatus(projectId, 'PLANNING');
+diff --git a/packages/lambdas/src/handlers/review-chapter.ts b/packages/lambdas/src/handlers/review-chapter.ts
+index 8adb20f..464a44b 100644
+--- a/packages/lambdas/src/handlers/review-chapter.ts
++++ b/packages/lambdas/src/handlers/review-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -10,7 +9,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -87,45 +86,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     revisionRound: node.revisionRound,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: editorTaskDefArn,
++    workerType: 'editor',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: editorTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+       BRANCH_NAME: branchName,
+       PR_NUMBER: String(prNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'editor',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(projectId, taskGraph.version, nodeId, 'REVIEWING', runId);
+diff --git a/packages/lambdas/src/handlers/revise-chapter.ts b/packages/lambdas/src/handlers/revise-chapter.ts
+index 3dd525a..32774a3 100644
+--- a/packages/lambdas/src/handlers/revise-chapter.ts
++++ b/packages/lambdas/src/handlers/revise-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -11,7 +10,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -107,45 +106,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     return;
+   }
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: reviserTaskDefArn,
++    workerType: 'reviser',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: reviserTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+       BRANCH_NAME: branchName,
+       PR_NUMBER: String(prNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'reviser',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(
+diff --git a/packages/lambdas/src/handlers/trigger-chapter.ts b/packages/lambdas/src/handlers/trigger-chapter.ts
+index cc7047c..2f787c0 100644
+--- a/packages/lambdas/src/handlers/trigger-chapter.ts
++++ b/packages/lambdas/src/handlers/trigger-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -11,7 +10,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -116,45 +115,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   const paddedChapter = String(chapterNumber).padStart(2, '0');
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: writerTaskDefArn,
++    workerType: 'writer',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: writerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(chapterNumber),
+       BRANCH_NAME: `chapter-${paddedChapter}`,
+       ISSUE_NUMBER: node.issueNumber !== undefined ? String(node.issueNumber) : '',
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'writer',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(projectId, taskGraph.version, nodeId, 'WRITING', runId);
+diff --git a/packages/lambdas/src/shared/__tests__/launch-agent-run.test.ts b/packages/lambdas/src/shared/__tests__/launch-agent-run.test.ts
+new file mode 100644
+index 0000000..c386ee2
+--- /dev/null
++++ b/packages/lambdas/src/shared/__tests__/launch-agent-run.test.ts
+@@ -0,0 +1,153 @@
++import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
++import type { AgentRunService, TaskOutputService, EnvironmentConfig } from '@auto-graph/core';
++
++vi.mock('../ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../ecs-launcher.js')>();
++  return {
++    ...actual,
++    launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123'),
++  };
++});
++
++import { launchECSTask } from '../ecs-launcher.js';
++import { launchAgentRun } from '../launch-agent-run.js';
++
++const config: EnvironmentConfig = {
++  AWS_REGION: 'us-east-1',
++  DYNAMODB_TABLE_PREFIX: 'test',
++  SQS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123',
++  ECS_CLUSTER_ARN: 'arn:aws:ecs:us-east-1:123:cluster/main',
++  ECS_SUBNETS: 'subnet-aaa',
++  ECS_SECURITY_GROUPS: 'sg-aaa',
++  GITHUB_TOKEN: 'ghp_test',
++  GITHUB_ORG: 'test-org',
++  ORCHESTRATION_REPO: 'test-repo',
++  LOG_LEVEL: 'info',
++};
++
++let mockAgentRunService: { create: ReturnType<typeof vi.fn> };
++let mockTaskOutputService: { save: ReturnType<typeof vi.fn> };
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  vi.mocked(launchECSTask).mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123');
++
++  mockAgentRunService = { create: vi.fn().mockResolvedValue(undefined) };
++  mockTaskOutputService = { save: vi.fn().mockResolvedValue(undefined) };
++});
++
++afterEach(() => {
++  delete process.env['STATE_MACHINE_ARN'];
++});
++
++function baseParams() {
++  return {
++    taskDefArn: 'arn:aws:ecs:us-east-1:123:task-definition/outliner:1',
++    workerType: 'outliner' as const,
++    systemPrompt: 'a system prompt',
++    projectId: 'proj-123',
++    repoName: 'the-dark-tower',
++    config,
++    agentRunService: mockAgentRunService as unknown as AgentRunService,
++    taskOutputService: mockTaskOutputService as unknown as TaskOutputService,
++  };
++}
++
++describe('launchAgentRun', () => {
++  it('generates a ulid-shaped runId', async () => {
++    const result = await launchAgentRun(baseParams());
++    expect(result.runId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
++  });
++
++  it('returns the runId and taskArn from launchECSTask', async () => {
++    const result = await launchAgentRun(baseParams());
++    expect(result.taskArn).toBe('arn:aws:ecs:us-east-1:123:task/test/abc123');
++  });
++
++  it('saves the system prompt as a task output', async () => {
++    const result = await launchAgentRun(baseParams());
++
++    expect(mockTaskOutputService.save).toHaveBeenCalledOnce();
++    const [outputItem] = mockTaskOutputService.save.mock.calls[0]!;
++    expect(outputItem.runId).toBe(result.runId);
++    expect(outputItem.outputType).toBe('system-prompt');
++    expect(outputItem.projectId).toBe('proj-123');
++    expect(outputItem.content).toBe('a system prompt');
++    expect(outputItem.contentLength).toBe('a system prompt'.length);
++  });
++
++  it('launches the ECS task with the standard environment keys', async () => {
++    const result = await launchAgentRun(baseParams());
++
++    expect(vi.mocked(launchECSTask)).toHaveBeenCalledOnce();
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.taskDefinition).toBe('arn:aws:ecs:us-east-1:123:task-definition/outliner:1');
++    expect(params.command).toEqual(['claude', '-p', '$SYSTEM_PROMPT']);
++    expect(params.environment['PROJECT_ID']).toBe('proj-123');
++    expect(params.environment['REPO_NAME']).toBe('the-dark-tower');
++    expect(params.environment['RUN_ID']).toBe(result.runId);
++    expect(params.environment['AWS_REGION']).toBe('us-east-1');
++    expect(params.environment['DYNAMODB_TABLE_PREFIX']).toBe('test');
++    expect(params.config).toBe(config);
++    expect(params.runId).toBe(result.runId);
++    expect(params.projectId).toBe('proj-123');
++  });
++
++  it('merges extraEnv into the standard environment keys', async () => {
++    await launchAgentRun({
++      ...baseParams(),
++      extraEnv: { CHAPTER_NUMBER: '3', BRANCH_NAME: 'chapter-03' },
++    });
++
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.environment['CHAPTER_NUMBER']).toBe('3');
++    expect(params.environment['BRANCH_NAME']).toBe('chapter-03');
++    expect(params.environment['PROJECT_ID']).toBe('proj-123');
++  });
++
++  it('passes STATE_MACHINE_ARN from the environment to launchECSTask', async () => {
++    process.env['STATE_MACHINE_ARN'] = 'arn:aws:states:us-east-1:123:stateMachine/test';
++
++    await launchAgentRun(baseParams());
++
++    const [params] = vi.mocked(launchECSTask).mock.calls[0]!;
++    expect(params.stateMachineArn).toBe('arn:aws:states:us-east-1:123:stateMachine/test');
++  });
++
++  it('creates the agent-run record with status RUNNING', async () => {
++    const result = await launchAgentRun(baseParams());
++
++    expect(mockAgentRunService.create).toHaveBeenCalledOnce();
++    const [runItem] = mockAgentRunService.create.mock.calls[0]!;
++    expect(runItem.runId).toBe(result.runId);
++    expect(runItem.projectId).toBe('proj-123');
++    expect(runItem.taskArn).toBe(result.taskArn);
++    expect(runItem.workerType).toBe('outliner');
++    expect(runItem.status).toBe('RUNNING');
++    expect(runItem.nodeId).toBeUndefined();
++  });
++
++  it('includes nodeId on the agent-run record when supplied', async () => {
++    await launchAgentRun({ ...baseParams(), nodeId: 'node-1' });
++
++    const [runItem] = mockAgentRunService.create.mock.calls[0]!;
++    expect(runItem.nodeId).toBe('node-1');
++  });
++
++  it('uses the same runId for the task output and the agent-run record', async () => {
++    await launchAgentRun(baseParams());
++
++    const [outputItem] = mockTaskOutputService.save.mock.calls[0]!;
++    const [runItem] = mockAgentRunService.create.mock.calls[0]!;
++    expect(outputItem.runId).toBe(runItem.runId);
++  });
++
++  it('saves the task output before launching the ECS task, even when the launch fails', async () => {
++    vi.mocked(launchECSTask).mockRejectedValueOnce(new Error('ECS launch error'));
++
++    await expect(launchAgentRun(baseParams())).rejects.toThrow('ECS launch error');
++
++    expect(mockTaskOutputService.save).toHaveBeenCalledOnce();
++    expect(mockAgentRunService.create).not.toHaveBeenCalled();
++  });
++});
+diff --git a/packages/lambdas/src/shared/index.ts b/packages/lambdas/src/shared/index.ts
+index b800a0b..97b758b 100644
+--- a/packages/lambdas/src/shared/index.ts
++++ b/packages/lambdas/src/shared/index.ts
+@@ -2,6 +2,8 @@ export type { HandlerContext } from './types.js';
+ export { withSQSHandler } from './middleware.js';
+ export { launchECSTask, getECSTaskStatus } from './ecs-launcher.js';
+ export type { LaunchECSTaskParams, ECSTaskStatus } from './ecs-launcher.js';
++export { launchAgentRun } from './launch-agent-run.js';
++export type { LaunchAgentRunParams } from './launch-agent-run.js';
+ export { withErrorHandling } from './error-handler.js';
+ export type { ErrorHandlerOptions } from './error-handler.js';
+ export { success, accepted, badRequest, serverError } from './responses.js';
+diff --git a/packages/lambdas/src/shared/launch-agent-run.ts b/packages/lambdas/src/shared/launch-agent-run.ts
+new file mode 100644
+index 0000000..214ca92
+--- /dev/null
++++ b/packages/lambdas/src/shared/launch-agent-run.ts
+@@ -0,0 +1,75 @@
++import { ulid } from 'ulid';
++import type { AgentRunService, TaskOutputService, WorkerType } from '@auto-graph/core';
++import { launchECSTask } from './ecs-launcher.js';
++import type { HandlerContext } from './types.js';
++
++export interface LaunchAgentRunParams {
++  taskDefArn: string;
++  workerType: WorkerType;
++  systemPrompt: string;
++  projectId: string;
++  repoName: string;
++  extraEnv?: Record<string, string> | undefined;
++  config: HandlerContext['config'];
++  agentRunService: AgentRunService;
++  taskOutputService: TaskOutputService;
++  nodeId?: string | undefined;
++}
++
++export async function launchAgentRun(
++  params: LaunchAgentRunParams,
++): Promise<{ runId: string; taskArn: string }> {
++  const {
++    taskDefArn,
++    workerType,
++    systemPrompt,
++    projectId,
++    repoName,
++    extraEnv,
++    config,
++    agentRunService,
++    taskOutputService,
++    nodeId,
++  } = params;
++
++  const runId = ulid();
++  const now = new Date().toISOString();
++
++  await taskOutputService.save({
++    runId,
++    outputType: 'system-prompt',
++    projectId,
++    content: systemPrompt,
++    contentLength: systemPrompt.length,
++    createdAt: now,
++  });
++
++  const taskArn = await launchECSTask({
++    taskDefinition: taskDefArn,
++    command: ['claude', '-p', '$SYSTEM_PROMPT'],
++    environment: {
++      PROJECT_ID: projectId,
++      REPO_NAME: repoName,
++      RUN_ID: runId,
++      AWS_REGION: config.AWS_REGION,
++      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
++      ...extraEnv,
++    },
++    config,
++    stateMachineArn: process.env['STATE_MACHINE_ARN'],
++    runId,
++    projectId,
++  });
++
++  await agentRunService.create({
++    runId,
++    projectId,
++    taskArn,
++    workerType,
++    ...(nodeId !== undefined ? { nodeId } : {}),
++    status: 'RUNNING',
++    startedAt: now,
++  });
++
++  return { runId, taskArn };
++}

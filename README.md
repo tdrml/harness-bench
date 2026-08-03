@@ -16,6 +16,8 @@ So I tried to measure the same layers under controlled conditions: same model, s
 
 The interesting conclusion is the tension between those two facts: **harness ROI is a function of horizon, not a constant.** Below some task-length/autonomy threshold, frontier models don't need the scaffolding. Production fleets operate far above that threshold, where the same scaffolding blocks failures continuously. Benchmarks that grade harnesses on short tasks are measuring the flat part of the curve.
 
+**Pilot 7 moved to epic scale — eight dependent issues delivered one at a time into one accumulating repository — and produced the study's sharpest result.** The harness fixed the single issue where builds break, completely and significantly (9/9 vs 4/9), and **changed end-to-end success not at all: 4/9 epics both arms, identical at every tier.** A different failure mode, untouched by any harness layer, was enough to sink the sequence anyway. **At horizon, reliability is conjunctive** — eliminating your most visible failure mode buys nothing a user experiences while another remains. It also overturned this study's own earlier advice: the cheap-model-plus-scaffolding stack from findings 9–10 delivers **zero** clean epics at any price, while **bare Opus is the cheapest, fastest and most reliable configuration tested** ($26/epic, $39.56/success). § Pilot 7.
+
 **Pilot 6 asked the question the study had been dodging: can a harness buy what a better model buys?** Sometimes, and it depends entirely on *how* the task fails. On a 34-site mechanical migration, both frontier tiers succeeded bare where the cheap model needed the harness — and **bare Opus was the cheapest path to a correct result of any configuration tested** ($2.43/success vs $3.55 for haiku+harness), because it needed a third of the turns. On a task whose failure mode is *omission*, **nothing worked: 0 of 18 runs across all three tiers and both arms, 17 of them silent.** § Pilot 6.
 
 **Pilot 5 replicated it at n=3 on two repos — and found the sharp edge of planning.** Across 72 runs on 6 new tasks, only one configuration went perfect: **plan + full harness, 18/18**. Bare-with-plan went 14/18, *below* bare-without-plan (16/18), and the autopsy explains why: a plan substitutes for exploration, so when its consistency sweep is incomplete, the executor stops at the checklist instead of discovering the gap. No comparison reaches p<0.05 — see § Pilot 5 for why that honest caveat matters more than the point estimates.
@@ -193,6 +195,164 @@ Opus was the cheapest *and* the most reliable, because capability shows up as **
 
 ---
 
+## Pilot 7 — epic scale: eight dependent issues, one accumulating repository
+
+Every pilot above ran a **single session against a pristine checkout**. The study's own
+thesis is that harness ROI grows with horizon, and the production contrast it cites
+comes from multi-hour, multi-issue, stateful work. That regime had never been tested.
+
+**Design.** One epic — add a two-stage release phase to the `auto-graph` pipeline —
+decomposed into **8 sequentially dependent issues**, delivered one issue per **fresh
+headless session into the same accumulating working tree**, one git commit per issue.
+The agent never sees the other issues, the epic plan, or its own earlier sessions:
+conventions introduced by issue *N* must be **rediscovered from the repository** by
+issue *N+k*. Grid: {haiku-4.5, sonnet-5, opus-5} × {A0, FULL} × n=3 = **18 epics, 144
+graded issues, $501.29**. Pre-registered in [`PILOT7-PREREGISTRATION.md`](PILOT7-PREREGISTRATION.md),
+with four append-only amendments recorded as they happened.
+
+Two grading changes, both pre-registered: the done-gate now runs **`build && test`**,
+not `test` alone (finding 17a), and each holdout is graded **twice — by vitest and by
+the compiler**, since a missing `export type` from a barrel has no runtime footprint
+and barrel omission is exactly the failure class this epic plants.
+
+A **calibration gate** ran before any graded run: a full reference implementation of
+all 8 issues, replayed commit by commit, requiring every holdout to be red on the
+state before its issue and green after. It caught two defects that would have
+invalidated the grid — see finding 22.
+
+| cell | epic strict | integration holdout | median survival /8 | median wall | $/epic | $/strict epic |
+|---|---|---|---|---|---|---|
+| haiku:A0 | 0/3 | 1/3 | 4 | 71 min | $6.76 | – |
+| haiku:FULL | 0/3 | 2/3 | 3 | 106 min | $11.16 | – |
+| sonnet:A0 | 2/3 | 2/3 | 6 | 67 min | $31.98 | $47.98 |
+| sonnet:FULL | 2/3 | 3/3 | 8 | 111 min | $52.04 | $78.06 |
+| **opus:A0** | 2/3 | 3/3 | 8 | **53 min** | **$26.37** | **$39.56** |
+| opus:FULL | 2/3 | 3/3 | 8 | 85 min | $38.78 | $58.17 |
+
+`epicStrict` = build ∧ full suite ∧ *every* issue's holdout ∧ the end-to-end
+integration holdout, all evaluated after the last issue. `survival` = consecutive
+strict-green issues before the first failure.
+
+---
+
+**19. The harness eliminated one failure mode completely and bought nothing end-to-end.**
+Epic success is **4/9 harnessed versus 4/9 bare — identical, at every tier** (Fisher
+p=1.000 within each tier and pooled). But per issue position the arms are
+indistinguishable *everywhere except one*:
+
+| position | what it asks for | bare | harnessed | p (unadjusted) |
+|---|---|---|---|---|
+| i1–i6 | new modules, wiring, refactor | — | — | 1.000 each |
+| **i7** | cross-cutting migration over existing debt | **4/9** | **9/9** | **0.029** |
+| i8 | change established terminal behavior | 4/9 | 5/9 | 1.000 |
+
+Issue 7 is where builds break, and the gate runs `build && test`, so it fixed issue 7
+outright — and touched nothing else. Issue 8 then failed independently at the same
+rate in both arms, which is sufficient to fail the whole epic. Hence identical epic
+rates despite a real, large, mechanistically-explained per-issue effect.
+
+> **At horizon, reliability is conjunctive.** Eliminating your most visible failure
+> mode buys nothing end-to-end while a second one remains untouched. A harness
+> evaluated on the failure it was designed to catch will look excellent and change
+> nothing a user experiences.
+
+This is the strongest practical argument in the study for measuring agent reliability
+**per sequence, not per task**. Six of eight positions were already saturated; a
+single-task benchmark drawing from those six would have concluded the harness does
+nothing, and one drawing from i7 would have concluded it is transformative. Both would
+be describing the same system.
+
+**20. Honest statistics on that p=0.029: it does not survive correction.** It is the
+first sub-0.05 value in seven pilots, which is precisely when to distrust oneself. All
+**eight** positions were tested, not just the interesting one. Bonferroni for 8 tests
+requires p<0.00625; Holm–Bonferroni stops at the first step. **0.029 survives neither.**
+What separates it from noise-mining is that the mechanism was observed independently
+and before the test: the gate's blocks fire at i7, the bare i7 failures *are* build
+breaks, and **every one of 43 harnessed issues ended with a green build against 7 bare
+breaks**. Reported as a direction with a confirmed mechanism; not as a finding.
+
+**21. Tier buys capability; the gate buys repository integrity; neither substitutes for
+the other.** Frontier tiers went 4/6 versus haiku's **0/6** (p=0.061 — the largest
+effect measured here, and it also misses significance). Haiku produced no clean epic in
+six attempts under either arm: **a perfect gate cannot make a model capable.** Bare
+sonnet and opus each lost an epic to a *type-only* error the 1,122-test suite could not
+see. And **bare opus is the cheapest, fastest, most reliable configuration tested** —
+$26.37/epic, 53 minutes, $39.56 per success, roughly half the cost per success of
+anything else.
+
+That **contradicts this study's own earlier advice.** Findings 9–10 concluded the
+cheapest reliable stack was haiku-plan → haiku → gates+reviewer, with no frontier model
+in the loop. At single-task scale that held. **At epic scale it collapses**: the same
+cheap-model stack delivers zero clean epics at any price. The horizon jump does not
+merely amplify the harness's value — it changes which axis matters.
+
+**22. Agents add reliably and modify unreliably.** Issues 1 and 2 (new module, new
+work-item schema) failed **0 times in 15**. Issue 8 — which requires *removing* an
+established terminal behavior (`final-review` marking a project `COMPLETE`) and
+replacing it with a handoff — failed **8 of 14**, at every tier and in both arms. All
+five own-work failures at i8 were the identical three assertions about entering the
+release phase; **the documentation assertions in that same holdout passed every time**,
+so this is genuine last-mile integration failure, not a stale-README artifact.
+
+This also explains a harness failure mode worth naming: **an adversarial reviewer
+prompted to *refute* a diff is structurally biased toward the status quo, which is
+backwards on a behavior-removal issue.** On i8 the reviewer demanded that `final-review`
+preserve `chapterCount` and `completedAt` — behavior the issue existed to delete —
+citing an ambiguous clause in the brief. i8 own-work green was 7/9 bare versus 3/7
+harnessed, but that is **p=0.302 and driven mostly by one tier**; published as an
+observation with a legible cause, explicitly not as a result. *(An earlier draft of
+this section stated it far more strongly from the haiku cell alone; the correction is
+journaled in `results/pilot7.jsonl`.)*
+
+**23. Cascade is real, and its measured depth is an artifact of where the break lands.**
+Using the decisive test — an issue's build-error set being byte-identical to its
+predecessor's — cascade appears 3 times in 18 epics, **always at depth 1**, because the
+originating break is at i7 and only i8 follows it. The smoke epic, where the break
+landed at i5, cascaded three deep. **These numbers understate cascade**; a pilot that
+plants the cross-cutting migration early would measure the real distribution.
+
+Cascade is also why this pilot records `holdoutAssertionsGreen` separately from
+`strict`: `tsc --build` is per-package, so one unrepaired type error fails *every* later
+holdout in that package regardless of that issue's own work. In the smoke epic bare
+haiku scored 4/8 strict while passing **8/8** of its own assertions. Without that
+split, "the agent left the repo broken once" reads as "the agent failed four issues."
+
+**24. Four more instrument findings, all caught before or during the grid.**
+(a) The **calibration gate** caught a *specification bug in my own brief*:
+`clampToProjectType` was under-specified for a range lying entirely outside the target
+band, and the reference implementation dutifully returned `{min: 8000, max: 5000}` — a
+range whose minimum exceeds its maximum. Unfixed, **every cell of the grid would have
+failed issue 7 for correct work**, and I would have published it as a finding about
+model capability. It also caught a holdout that graded *phrasing* (requiring the digit
+`7` to precede the word "keywords"). An author-written benchmark has two independent
+failure modes — the spec can be wrong, and the grader can over-specify — and **a
+reference implementation is the only instrument that separates them.**
+(b) A `no-files-changed` plausibility alarm on an issue that spent $0.69 over 62 turns
+was **the harness's bug, not the model's**: the agent had committed its own work, and
+every metric was computed from `git diff HEAD`, which then reports nothing. That
+silently zeroed the published diff artifact, the discipline metrics, and the tamper
+check — and would have handed the adversarial reviewer an **empty diff**, reintroducing
+finding 2 inside my own runner. Everything now diffs against a base SHA captured before
+each issue runs. The grid was restarted from zero.
+(c) `pnpm -s build` **fails with exit code 1 and prints nothing**; a grader keying on
+output text rather than exit status would score every broken build as green.
+(d) **Finding 2 recurred at a third scale.** Two of 15 early FULL issues ended with the
+reviewer *dead* rather than dissenting (`is_error`, 26 turns against a 25-turn budget,
+`stop_reason: tool_use`, no verdict emitted). The budget was **deliberately not raised
+mid-grid** — the arms were pre-registered and `FULL` must mean one thing across all 18
+epics. The consequence is stated rather than hidden: the arm comparison is
+**conservative**, since roughly an eighth of early review stages silently did not run.
+
+*Limitations specific to this pilot:* one epic, one repository, one author; n=3 per
+cell; issue ordering is fixed, so order effects and issue difficulty are confounded by
+construction; six of eight positions saturated, so the design's power rests on i7 and
+i8 alone; and the pre-registered compounding bet (epic success ≈ *p*<sup>8</sup>) was
+only half right — per-issue success ran 91–96% at frontier tiers, yet epic success was
+44%, because failures concentrate at specific positions rather than distributing
+independently.
+
+---
+
 ## Where harness value actually lives (the production contrast)
 
 The platform I operate in production runs coding agents for up to four hours per task in isolated containers, across a fleet that has authored 1,000+ merged PRs (~98% merge rate) across ~13 repositories. Its telemetry over a recent window shows **28.8% of dev-class runs (106/368) hitting at least one deterministic guardrail block** — dirty-tree stops, force-push prevention, done-without-PR gates — each one a divergence prose rules had failed to prevent. The same platform needed schema-forced outputs after prose JSON kept breaking, payload offload after context silently dropped, and a render-before-merge gate after reviewer agents approved visually wrong UIs.
@@ -209,9 +369,11 @@ The variable that changed is **horizon**: minutes vs hours, one objective vs a t
 - **One author wrote the tasks, the holdouts, and the harness.** Pre-registration and published raw journals mitigate; they don't eliminate.
 - **Contamination:** both target repos were private during all graded runs and published afterward; task briefs are synthetic; model training cutoffs predate the repos' existence in public form.
 - **Two repos, both mine, both TypeScript/vitest monorepos**, and closer in size than this README originally said (20K vs 31K lines of hand-written TypeScript, not 20K vs 79K — § Finding 18). Cross-repo consistency (telos 34/36, auto-graph 31/36) is reassuring but not external validity.
+- **Pilot 7 runs one epic, on one repository, authored by one person**, at n=3 per cell. Six of its eight issue positions saturated, so its design rests on two positions; issue order is fixed, so order effects and issue difficulty are confounded by construction. Its one sub-0.05 value does not survive correction for the eight positions tested (§ Finding 20).
 - **Pilot 6 runs on one repo only.** Every telos task authored for it saturated for bare haiku (3/3 three times), so the tier comparison is measured entirely on auto-graph. Its `ab1` cells are n=3, and its headline tier contrast is p=0.083 — a direction, not a result.
 - **The production numbers are observational**, from one platform, and not independently auditable in this repo (the platform is company-owned). They motivate the horizon hypothesis; they don't prove it.
 - The reviewer/harness implementations are minimal clean-room versions of the production patterns, not the production code.
+- **The instrument has been wrong repeatedly, in every pilot that looked for it.** Findings 6, 17 and 24 document a false-failure rate around 50% in one pilot, a success definition that omitted the build, a credential expiry scored as a model failure, and a diff baseline that silently zeroed the published artifacts. Every one was caught by a plausibility check or an autopsy, never by the pass/fail column. Results here should be read as *the output of an instrument that is audited*, not one that is assumed correct.
 
 ## Reproduce
 
@@ -227,7 +389,16 @@ node runner/run-pilot4.mjs   # pilot 4 (24 planning-ablation runs, ~$30)
 git clone https://github.com/tdrml/auto-graph .pristine-autograph   # second target (pilot 5)
 node runner/run-pilot5.mjs   # pilot 5 (72 runs, two repos, ~$64)
 node runner/run-pilot6.mjs   # pilot 6 (36 runs, tier x enforcement, ~$121)
+node runner/calibrate-pilot7.mjs  # pilot 7 calibration gate (needs a reference impl)
+node runner/run-pilot7.mjs   # pilot 7 (18 epics x 8 issues, ~$501)
+node runner/analyze-pilot7.mjs    # pilot 7 tables + significance
 ```
+
+Pilot 7 differs structurally: it runs **epics**, not tasks. Each epic is one persistent
+working tree that eight fresh agent sessions modify in sequence, with a commit per
+issue, per-issue scoring at each boundary, and a re-grade of every holdout after the
+last issue. `runner/harness-pilot7.service` is the systemd unit used to run the grid
+detached under a cgroup memory cap.
 
 Runners are sequential, resumable (JSONL journal is the source of truth), and kill-switched on summed API-equivalent cost.
 

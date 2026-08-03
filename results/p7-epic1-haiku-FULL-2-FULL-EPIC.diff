@@ -1,0 +1,3918 @@
+diff --git a/README.md b/README.md
+index e3bd98f..ae006d5 100644
+--- a/README.md
++++ b/README.md
+@@ -16,7 +16,8 @@ A user creates a "kickoff" issue on a (private) orchestration repo with a `kicko
+ Kickoff Issue → Bootstrap Project → Create Repo → Generate Outline → Plan Chapters
+     → Create Issues → Write Chapters (parallel batches) → Editorial Review
+     → Revise (if needed) → Merge → Continuity Check → Next Chapters
+-    → Continuity Audit → Final Review
++    → Continuity Audit → Continuity Fix → Final Review → Package Manuscript
++    → Generate Listing (marketer) → Release
+ ```
+ 
+ Each chapter goes through a writing loop:
+@@ -36,7 +37,7 @@ Continuity state (character positions, timeline, plot threads, established facts
+ AWS-native serverless architecture:
+ 
+ - **15 Lambda handlers** — one per pipeline stage, event-driven via SQS FIFO
+-- **7 ECS Fargate workers** — long-running Claude Code CLI tasks (outliner, planner, writer, editor, reviser, continuity-checker, auditor)
++- **10 ECS Fargate workers** — long-running Claude Code CLI tasks (outliner, planner, writer, editor, reviser, continuity-checker, auditor, fixer, packager, marketer)
+ - **Step Functions** — orchestrates async ECS polling without busy-wait
+ - **DynamoDB** — 5 tables (projects, task-graphs, agent-runs, task-outputs, repo-locks)
+ - **SQS FIFO** — work-item queue with per-project message grouping
+@@ -69,7 +70,9 @@ packages/
+ | **continuity-check** | Launches continuity-checker ECS task, loads existing state from repo |
+ | **trigger-next-chapter** | Finds ready nodes in dependency DAG, respects concurrency limit |
+ | **continuity-audit** | Launches auditor ECS task for holistic full-book continuity audit after all chapters merge |
+-| **final-review** | Tallies word counts, marks project complete |
++| **final-review** | Tallies word counts, sets status to PACKAGING, enqueues packager |
++| **package-manuscript** | Launches packager ECS task for manuscript assembly and EPUB/PDF generation |
++| **generate-listing** | Launches marketer ECS task for store listing generation |
+ 
+ A **reconcile-enqueuer** (EventBridge schedule) runs every 5 minutes to detect stalled agent runs and re-enqueue them.
+ 
+@@ -84,6 +87,9 @@ A **reconcile-enqueuer** (EventBridge schedule) runs every 5 minutes to detect s
+ | **reviser** | Incorporates editorial feedback, pushes revisions to same branch |
+ | **continuity-checker** | Audits cross-chapter consistency, produces state delta and report |
+ | **auditor** | Performs holistic full-book continuity audit across all chapters (120-min timeout) |
++| **fixer** | Applies auto-fixes for continuity issues flagged by auditor |
++| **packager** | Assembles final manuscript and generates EPUB/PDF manifests |
++| **marketer** | Generates store listing (blurb, keywords, categories) for KDP distribution |
+ 
+ Workers fetch system prompts from DynamoDB via `RUN_ID` and execute the Claude Code CLI. All workers run on 2 vCPU / 8 GB Fargate tasks.
+ 
+diff --git a/docs/HLD.md b/docs/HLD.md
+index 2c60858..9e49a51 100644
+--- a/docs/HLD.md
++++ b/docs/HLD.md
+@@ -32,34 +32,39 @@ The shared foundation consumed by all other packages.
+ | `github/` | Octokit wrapper for repo creation, issue management, PR lifecycle |
+ | `logger/` | Structured JSON logging with correlation IDs |
+ | `merge-policy/` | Merge readiness evaluation against editorial criteria (word count gate, review approval, continuity pass) |
+-| `prompts/` | System prompt templates for all six agent types (outliner, planner, writer, editor, reviser, continuity-checker) |
++| `prompts/` | System prompt templates for all ten agent types (outliner, planner, writer, editor, reviser, continuity-checker, auditor, fixer, packager, marketer) |
+ | `queue/` | SQS work-item type definitions and enqueue helper |
+ | `writing/` | Writing-domain utilities: continuity tracking, word count validation, chapter markdown parsing, style checking |
+ 
+ ### 2.2 Lambda Handlers (`@auto-graph/lambdas`)
+ 
+-Fourteen event-driven Lambda functions, each handling one work-item type.
++Nineteen event-driven Lambda functions, each handling one work-item type.
+ 
+ | Handler | Trigger | Responsibility |
+ |---|---|---|
+-| `bootstrap-project` | Webhook (kickoff issue) | Create project record, enqueue `BOOTSTRAP_REPO` |
++| `webhook-handler` | API Gateway | Receive GitHub webhooks (kickoff issues), route to `bootstrap-project` |
++| `bootstrap-project` | SQS | Create project record, enqueue `BOOTSTRAP_REPO` |
+ | `bootstrap-repo` | SQS | Create target repo with writing scaffolding, enqueue `GENERATE_OUTLINE` |
+ | `generate-outline` | SQS | Launch outliner ECS task, poll for completion, enqueue `PLAN_CHAPTERS` |
+ | `plan-chapters` | SQS | Launch planner ECS task, produce chapter task graph, enqueue `CREATE_ISSUES` |
+ | `create-issues` | SQS | Create GitHub issues from chapter plan, enqueue first `TRIGGER_CHAPTER` |
+-| `trigger-chapter` | SQS | Launch writer ECS task for a chapter batch |
+-| `reconcile` | Step Functions poll | Check ECS task status, sync DynamoDB state |
++| `trigger-chapter` | SQS | Load continuity state, launch writer ECS task for chapter |
++| `reconcile` | Step Functions poll | Check ECS task status, route results to downstream handlers |
+ | `reconcile-enqueuer` | EventBridge schedule | Periodic sweep for stalled runs, re-enqueue reconciliation |
+ | `review-chapter` | SQS | Launch editor ECS task for editorial review of chapter PR |
+ | `revise-chapter` | SQS | Launch reviser ECS task with editorial feedback |
+ | `merge-chapter` | SQS | Merge approved chapter PR, enqueue `CONTINUITY_CHECK` |
+ | `continuity-check` | SQS | Launch continuity-checker ECS task, update continuity state |
+ | `trigger-next-chapter` | SQS | Find next chapter(s) with satisfied dependencies, enqueue `TRIGGER_CHAPTER` |
+-| `webhook-handler` | API Gateway | Receive GitHub webhooks (PR events), route to appropriate handler |
++| `continuity-audit` | SQS | Launch auditor ECS task for holistic full-book continuity audit |
++| `continuity-fixer` | SQS | Launch fixer ECS task to apply continuity auto-fixes |
++| `final-review` | SQS | Tally word counts, set status to `PACKAGING`, enqueue `PACKAGE_MANUSCRIPT` |
++| `package-manuscript` | SQS | Launch packager ECS task to assemble manuscript and generate manifests |
++| `generate-listing` | SQS | Launch marketer ECS task to generate store listing |
+ 
+ ### 2.3 ECS Workers (`@auto-graph/worker`)
+ 
+-Six purpose-built Fargate task definitions, each running Claude Code CLI with a domain-specific system prompt.
++Ten purpose-built Fargate task definitions, each running Claude Code CLI with a domain-specific system prompt.
+ 
+ | Worker | Purpose | Resources |
+ |---|---|---|
+@@ -69,10 +74,14 @@ Six purpose-built Fargate task definitions, each running Claude Code CLI with a
+ | `editor` | Editorial review against writing criteria | 0.5 vCPU / 2 GB |
+ | `reviser` | Revise chapter based on editorial feedback | 1 vCPU / 4 GB |
+ | `continuity-checker` | Cross-chapter consistency audit | 0.5 vCPU / 2 GB |
++| `auditor` | Full-book continuity audit (120-min timeout) | 2 vCPU / 8 GB |
++| `fixer` | Apply continuity auto-fixes flagged by auditor | 1 vCPU / 4 GB |
++| `packager` | Assemble final manuscript, generate EPUB/PDF manifests | 1 vCPU / 4 GB |
++| `marketer` | Generate store listing (blurb, keywords, categories, pricing) | 1 vCPU / 4 GB |
+ 
+ ### 2.4 CDK Infrastructure (`@auto-graph/cdk`)
+ 
+-A single CDK stack that provisions all AWS resources: VPC, ECS cluster, six task definitions, fourteen Lambda functions, SQS FIFO queues, DynamoDB tables, Step Functions state machines, API Gateway, EventBridge pipes, ECR repository, and CloudWatch alarms.
++A single CDK stack that provisions all AWS resources: VPC, ECS cluster, ten task definitions, nineteen Lambda functions, SQS FIFO queues, DynamoDB tables, Step Functions state machines, API Gateway, EventBridge pipes, ECR repository, and CloudWatch alarms.
+ 
+ ---
+ 
+@@ -126,9 +135,35 @@ User creates kickoff issue on orchestration repo
+                     │                        │
+                     ▼                        ▼
+               ┌───────────────────────────────┐
+-              │       FINAL_REVIEW            │
++              │    CONTINUITY_AUDIT           │
+               │  (full manuscript continuity   │
+               │   audit after all chapters)    │
++              └────────┬──────────────────────┘
++                       │ enqueues CONTINUITY_FIX
++                       ▼
++              ┌───────────────────────────────┐
++              │  CONTINUITY_FIX               │
++              │  (apply auto-fixes)           │
++              └────────┬──────────────────────┘
++                       │ enqueues FINAL_REVIEW
++                       ▼
++              ┌───────────────────────────────┐
++              │     FINAL_REVIEW              │
++              │  (tally word counts)          │
++              └────────┬──────────────────────┘
++                       │ enqueues PACKAGE_MANUSCRIPT
++                       ▼
++              ┌───────────────────────────────┐
++              │  PACKAGE_MANUSCRIPT           │
++              │  (ECS: packager)              │
++              │  (assemble final form)        │
++              └────────┬──────────────────────┘
++                       │ enqueues GENERATE_LISTING
++                       ▼
++              ┌───────────────────────────────┐
++              │  GENERATE_LISTING             │
++              │  (ECS: marketer)              │
++              │  (store listing)              │
+               └───────────────────────────────┘
+ ```
+ 
+diff --git a/packages/cdk/src/__tests__/auto-graph-stack.test.ts b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+index c55de96..557d065 100644
+--- a/packages/cdk/src/__tests__/auto-graph-stack.test.ts
++++ b/packages/cdk/src/__tests__/auto-graph-stack.test.ts
+@@ -186,8 +186,8 @@ describe('AutoGraphStack', () => {
+   });
+ 
+   describe('ECS Task Definitions', () => {
+-    it('creates exactly 8 Fargate task definitions', () => {
+-      template.resourceCountIs('AWS::ECS::TaskDefinition', 8);
++    it('creates exactly 10 Fargate task definitions', () => {
++      template.resourceCountIs('AWS::ECS::TaskDefinition', 10);
+     });
+ 
+     it('creates outliner task def with 2 vCPU / 8 GB', () => {
+@@ -262,6 +262,15 @@ describe('AutoGraphStack', () => {
+         RequiresCompatibilities: ['FARGATE'],
+       });
+     });
++
++    it('creates packager task def with 2 vCPU / 8 GB', () => {
++      template.hasResourceProperties('AWS::ECS::TaskDefinition', {
++        Family: 'test-packager',
++        Cpu: '2048',
++        Memory: '8192',
++        RequiresCompatibilities: ['FARGATE'],
++      });
++    });
+   });
+ 
+   describe('Lambda functions', () => {
+diff --git a/packages/cdk/src/constructs/compute.ts b/packages/cdk/src/constructs/compute.ts
+index 3f1bbdd..4de2608 100644
+--- a/packages/cdk/src/constructs/compute.ts
++++ b/packages/cdk/src/constructs/compute.ts
+@@ -33,6 +33,8 @@ const TASK_CONFIGS: TaskConfig[] = [
+   { name: 'continuity-checker', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 15 },
+   { name: 'auditor', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 120 },
+   { name: 'fixer', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 60 },
++  { name: 'packager', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 30 },
++  { name: 'marketer', cpu: 2048, memoryLimitMiB: 8192, timeoutMinutes: 15 },
+ ];
+ 
+ function toPascalCase(str: string): string {
+diff --git a/packages/core/src/dynamodb/types.ts b/packages/core/src/dynamodb/types.ts
+index 0c391e4..ff913dd 100644
+--- a/packages/core/src/dynamodb/types.ts
++++ b/packages/core/src/dynamodb/types.ts
+@@ -10,6 +10,9 @@ export type ProjectStatus =
+   | 'PLANNING'
+   | 'WRITING'
+   | 'REVIEWING'
++  | 'PACKAGING'
++  | 'RELEASING'
++  | 'RELEASED'
+   | 'COMPLETE'
+   | 'FAILED';
+ 
+@@ -77,7 +80,9 @@ export type WorkerType =
+   | 'reviser'
+   | 'continuity-checker'
+   | 'auditor'
+-  | 'fixer';
++  | 'fixer'
++  | 'packager'
++  | 'marketer';
+ 
+ export type AgentRunStatus =
+   | 'PENDING'
+diff --git a/packages/core/src/index.ts b/packages/core/src/index.ts
+index e0172d6..189f893 100644
+--- a/packages/core/src/index.ts
++++ b/packages/core/src/index.ts
+@@ -8,4 +8,6 @@ export * from './queue/index.js';
+ export * from './writing/index.js';
+ export * from './prompts/index.js';
+ export * from './merge-policy/index.js';
++export * from './release-policy/index.js';
+ export * from './templates/index.js';
++export * from './word-count-policy/index.js';
+diff --git a/packages/core/src/prompts/editor.ts b/packages/core/src/prompts/editor.ts
+index f9e1dbc..7ce4f2b 100644
+--- a/packages/core/src/prompts/editor.ts
++++ b/packages/core/src/prompts/editor.ts
+@@ -3,6 +3,7 @@ import type { Style } from '../config/types.js';
+ import { ProjectType } from '../config/schemas.js';
+ import { pruneContinuityState } from '../writing/continuity.js';
+ import { buildSharedPreamble } from './shared.js';
++import { formatToleranceForPrompt } from '../word-count-policy/index.js';
+ 
+ export interface EditorPromptParams {
+   chapterNumber: number;
+@@ -75,7 +76,7 @@ Evaluate the chapter against every criterion below. For each criterion, scan the
+ 1. **Plot Consistency.** Does the chapter follow the master outline? Are all key plot events present? Does the structural-beat label in the outline match what the chapter actually delivers? Does the chapter plant the setups it was supposed to plant and pay off the setups it was supposed to pay off?
+ 2. **Character Voice.** Do characters speak and act in ways consistent with their character-bible profiles? Do the voice signatures hold — vocabulary, syntax, what each character hides behind? In multi-character scenes, are the voices distinct enough that a reader could tell who is speaking without dialogue tags?
+ 3. **Pacing and Scene Structure.** Does each scene have a clear objective, obstacle, escalation, and turn? Do scenes earn their length? Does tension rise across the chapter, or does it sit flat? Is there a chapter-opening hook in motion? Does the chapter close on a beat the reader carries forward?
+-4. **Word Count Compliance.** Is the word count within ±10% of the target (${wordCountTarget.toLocaleString()} words)?
++4. **Word Count Compliance.** Is the word count within ${formatToleranceForPrompt('review')} of the target (${wordCountTarget.toLocaleString()} words)?
+ 5. **Style Adherence.** Tense, POV, and voice as specified in the style guide. Apply this to every paragraph; flag any slip into present tense in a past-tense book, any POV shift, any tonal drift.
+ 6. **Prose Quality.** Specific over generic? Sentence rhythm varied? Sensory grounding present? Or does the prose lean on AI clichés ("she felt a sense of...", "his heart raced", "eyes like...", "the silence was deafening", "couldn't help but...", filtering through verbs of perception, empty modifiers like "very/really/quite", adverbs replacing strong verbs)? Flag specific lines, not abstract complaints.
+ 7. **Subtext and Dialogue.** Do characters speak around their feelings rather than directly stating them, except at moments where direct declaration is earned? Or is dialogue functioning as exposition delivery? Flag any line that exists only to inform the reader rather than to advance the scene.
+@@ -112,7 +113,7 @@ Evaluate the chapter against every criterion below. For each, scan the entire ch
+    - **SOURCING / UNSOURCED SPECIFIC** — a specific number, date, or named entity asserted without a sourceable anchor. The fix is either citation, hedging, or removal.
+ 3. **Subject Fidelity.** This replaces fictional "character voice" for non-fiction. Real, living subjects must be rendered from what the public record establishes about them — published interviews, essays, panels, podcast appearances, LinkedIn posts, press coverage. Flag any depiction that asserts traits, opinions, or behaviors the public record does not support. When the chapter quotes a named subject, the quote must be verbatim from a citable source; do not paraphrase quoted material as if it were quoted material.
+ 4. **Argument and Flow.** This replaces fictional "pacing and scene structure" for non-fiction. Does the chapter make a clear analytical argument? Is the argument grounded in cited specifics rather than generality? Does the analysis flow logically — claim, evidence, implication — or does it drift between unconnected anecdotes? If the chapter has a structural anchor in the outline (a founding decision, a recognition payoff, a pivot), is that anchor *landed* through cited evidence rather than merely asserted? Note: do NOT demand "scene-grade" rendering or "show, don't tell" beats here — analytical rendering is the genre default for reported non-fiction; only flag if the chapter is *unspecific*, not if it is *analytical*.
+-5. **Word Count Compliance.** Is the word count within ±10% of the target (${wordCountTarget.toLocaleString()} words)?
++5. **Word Count Compliance.** Is the word count within ${formatToleranceForPrompt('review')} of the target (${wordCountTarget.toLocaleString()} words)?
+ 6. **Style Adherence.** Tense, POV, and voice as specified in the style guide. Apply this to every paragraph; flag tense slips, POV shifts, and tonal drift. For non-fiction specifically, watch for: present-tense slips in analytical passages ("the platform *is*..." in a past-tense book), and sourcing meta-commentary ("according to the public record we reviewed...") that belongs in the front-matter "On Sourcing" note rather than in the chapter prose.
+ 7. **Prose Quality.** Sentence rhythm varied? Specific over generic? Or does the prose lean on AI tics — repeated rhetorical scaffolding ("the kind of X", "What X taught / bought / added"), inversion-aphorism patterns ("X did not Y. The Y was the X."), hyphen-stack noun phrases, mixed metaphors, abstract modifiers ("very", "really", "quite"), filtering through verbs of perception, adverbs replacing strong verbs? Flag specific lines, not abstract complaints. Do NOT flag fictional "show vs tell" issues; analytical prose telling a reader what a system did is correct for this genre.
+ 8. **Factual Continuity.** This is the non-fiction reframing of fictional continuity. Cross-check the chapter against the master outline, the character bible, the world bible, and the continuity state above. Specifically watch for: date conflicts (year of an event, year of a transition, decade of a trend), tenure math (someone "spent four months" but the chapter places them on the floor for a year), organizational structure (Meridian Holdings vs. Meridian Collective vs. Meridian Pulse kept distinct), named role titles, and direction-of-time errors (X happened "before" Y when it happened after). Quote both sides of any contradiction.${seriesBookNumber !== undefined ? `
+@@ -175,7 +176,7 @@ ${buildSharedPreamble()}
+ - **Voice**: ${style.voice}
+ - **Tense**: ${style.tense}
+ - **POV**: ${style.pov}
+-- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ±10%)
++- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ${formatToleranceForPrompt('review')})
+ 
+ <continuity_state>
+ \`\`\`json
+diff --git a/packages/core/src/prompts/index.ts b/packages/core/src/prompts/index.ts
+index 6ede6b0..60a3751 100644
+--- a/packages/core/src/prompts/index.ts
++++ b/packages/core/src/prompts/index.ts
+@@ -22,4 +22,10 @@ export type { AuditorPromptParams } from './auditor.js';
+ export { buildContinuityFixerPrompt } from './continuity-fixer.js';
+ export type { ContinuityFixerPromptParams } from './continuity-fixer.js';
+ 
++export { buildPackagerPrompt } from './packager.js';
++export type { PackagerPromptParams } from './packager.js';
++
++export { buildMarketerPrompt } from './marketer.js';
++export type { MarketerPromptParams } from './marketer.js';
++
+ export { buildSharedPreamble, GUARD_RAILS, CLI_INSTRUCTIONS, REPO_CONVENTIONS } from './shared.js';
+diff --git a/packages/core/src/prompts/marketer.ts b/packages/core/src/prompts/marketer.ts
+new file mode 100644
+index 0000000..72530ed
+--- /dev/null
++++ b/packages/core/src/prompts/marketer.ts
+@@ -0,0 +1,97 @@
++import { ProjectType } from '../config/schemas.js';
++import { buildSharedPreamble } from './shared.js';
++
++export interface MarketerPromptParams {
++  title: string;
++  repoName: string;
++  genre: string;
++  projectType?: ProjectType | undefined;
++}
++
++export function buildMarketerPrompt(params: MarketerPromptParams): string {
++  const { title, repoName, genre, projectType } = params;
++
++  return `# Marketer Agent — System Prompt
++
++You are the Marketer agent for the project **"${title}"**. Your responsibility is to create a store listing for the published work.
++
++${buildSharedPreamble()}
++
++## Context
++
++- **Repository**: ${repoName}
++- **Project Title**: ${title}
++- **Genre**: ${genre}
++- **Project Type**: ${projectType ?? 'NOVEL'}
++
++## Your Task
++
++Create a store listing file at \`release/listing.json\` containing the metadata needed for distribution.
++
++The listing must be valid JSON with this structure:
++
++\`\`\`json
++{
++  "title": "<title>",
++  "subtitle": "<optional subtitle>",
++  "blurb": "<marketing description>",
++  "author": "<author name>",
++  "keywords": [<7 keywords as strings>],
++  "categories": [<3 categories as strings>]
++}
++\`\`\`
++
++### Requirements
++
++1. **Title**: Use the project title "${title}".
++
++2. **Subtitle** (optional): A short tagline or subtitle.
++
++3. **Blurb**: A compelling 100-200 word marketing description of the work. Must be under 4000 characters. May contain HTML tags: \`<b>\`, \`<i>\`, \`<u>\`, \`<br>\`, \`<p>\`, \`<ul>\`, \`<li>\`, \`<ol>\`, \`<h4>\`, \`<h5>\`, \`<h6>\`. No other HTML tags are allowed.
++
++4. **Author**: The author name.
++
++5. **Keywords**: Exactly 7 keywords relevant to the work and genre "${genre}". These should help readers discover the work in search.
++
++6. **Categories**: Exactly 3 store categories. Use standard e-book categories that match the genre.
++
++### Examples
++
++Keywords (example): "fantasy", "adventure", "magic", "dragons", "epic quest", "coming of age", "heroes"
++
++Categories (example): "Fantasy", "Adventure", "Young Adult Fantasy"
++
++### Phase 1 — Read the manuscript and outline
++
++1. Read the assembled manuscript from \`manuscript/manuscript.md\`.
++2. Read the release manifest from \`release/manifest.json\` for context.
++3. Understand the key themes, characters, and plot of the work.
++
++### Phase 2 — Create the listing
++
++1. Craft a compelling blurb based on the manuscript content and genre.
++2. Select exactly 7 relevant keywords.
++3. Select exactly 3 appropriate store categories for the genre.
++4. Write the listing JSON and save it to \`release/listing.json\`.
++
++### Phase 3 — Commit and push
++
++\`\`\`
++git add release/listing.json
++git commit -m "create store listing for ${title}"
++git push
++\`\`\`
++
++## Self-check before completing
++
++Before you push the commit, confirm:
++
++- The listing JSON is valid.
++- The title matches "${title}".
++- The blurb is compelling and under 4000 characters.
++- There are exactly 7 keywords.
++- There are exactly 3 categories.
++- No fields contain "TODO:" placeholders.
++- The blurb contains no disallowed HTML tags.
++- The file has been committed and pushed.`;
++}
+diff --git a/packages/core/src/prompts/packager.ts b/packages/core/src/prompts/packager.ts
+new file mode 100644
+index 0000000..f8e3c35
+--- /dev/null
++++ b/packages/core/src/prompts/packager.ts
+@@ -0,0 +1,109 @@
++import { ProjectType } from '../config/schemas.js';
++import { buildSharedPreamble } from './shared.js';
++
++export interface PackagerPromptParams {
++  title: string;
++  repoName: string;
++  chapterCount: number;
++  projectType?: ProjectType | undefined;
++}
++
++export function buildPackagerPrompt(params: PackagerPromptParams): string {
++  const { title, repoName, chapterCount, projectType } = params;
++
++  return `# Packager Agent — System Prompt
++
++You are the Packager agent for the project **"${title}"**. Your responsibility is to assemble the final manuscript and generate a release manifest after all chapters have been merged and the continuity audit has been completed.
++
++${buildSharedPreamble()}
++
++## Context
++
++- **Repository**: ${repoName}
++- **Project Title**: ${title}
++- **Total chapters**: ${chapterCount}
++- **Project Type**: ${projectType ?? 'NOVEL'}
++
++## Your Task
++
++Produce two deliverables:
++
++### 1. Assemble the final manuscript at \`manuscript/manuscript.md\`
++
++Read all chapter files from \`manuscript/chapter-NN.md\` (zero-padded: \`chapter-01.md\`, \`chapter-02.md\`, etc., all the way to chapter ${chapterCount}) and concatenate them into a single \`manuscript/manuscript.md\` file.
++
++Do NOT edit the chapter text. Preserve every word exactly as written.
++
++Structure the assembled manuscript as:
++
++\`\`\`markdown
++# ${title}
++
++[front matter as desired]
++
++[chapter 1 content]
++
++[chapter 2 content]
++
++[chapter 3 content, etc.]
++\`\`\`
++
++### 2. Generate the release manifest at \`release/manifest.json\`
++
++Create a JSON manifest with metadata about this release. The manifest must be valid JSON with this structure:
++
++\`\`\`json
++{
++  "title": "${title}",
++  "projectType": "${projectType ?? 'NOVEL'}",
++  "chapterCount": ${chapterCount},
++  "finalWordCount": <total word count of manuscript/manuscript.md>,
++  "generatedAt": "<ISO-8601 timestamp>",
++  "chapters": [
++    {
++      "number": 1,
++      "title": "<chapter title from manuscript>",
++      "wordCount": <chapter word count>
++    },
++    {
++      "number": 2,
++      "title": "<chapter title from manuscript>",
++      "wordCount": <chapter word count>
++    }
++  ],
++  "status": "PACKAGED"
++}
++\`\`\`
++
++### Phase 1 — Assemble the manuscript
++
++1. Read each chapter file from \`manuscript/chapter-01.md\` through \`manuscript/chapter-${chapterCount}.md\`.
++2. Extract the chapter title (the first heading in each chapter file).
++3. Concatenate all chapters into a single file at \`manuscript/manuscript.md\`.
++4. Preserve the exact text from each chapter — no edits or rewrites.
++
++### Phase 2 — Count words and generate manifest
++
++1. Count the total word count of the final \`manuscript/manuscript.md\` file.
++2. For each chapter, count its word count separately.
++3. Extract chapter titles from the chapter files (the first heading in each).
++4. Generate the manifest JSON and write it to \`release/manifest.json\`.
++
++### Phase 3 — Commit and push
++
++\`\`\`
++git add manuscript/manuscript.md release/manifest.json
++git commit -m "package manuscript for ${title}"
++git push
++\`\`\`
++
++## Self-check before completing
++
++Before you push the commit, confirm:
++
++- The manuscript contains all ${chapterCount} chapters in order.
++- No chapter text has been modified — concatenation only.
++- The manifest JSON is valid and contains all required fields.
++- The word counts in the manifest match the actual content.
++- Both files have been committed and pushed.`;
++}
+diff --git a/packages/core/src/prompts/reviser.ts b/packages/core/src/prompts/reviser.ts
+index f527acd..9ade9a9 100644
+--- a/packages/core/src/prompts/reviser.ts
++++ b/packages/core/src/prompts/reviser.ts
+@@ -1,6 +1,7 @@
+ import type { Style } from '../config/types.js';
+ import { ProjectType } from '../config/schemas.js';
+ import { buildSharedPreamble } from './shared.js';
++import { formatToleranceForPrompt } from '../word-count-policy/index.js';
+ 
+ export interface ReviserPromptParams {
+   reviewComments: string;
+@@ -41,7 +42,7 @@ Apply each step. Apply each to every flagged passage, not only the first.
+ 4. **Revise integratively.** When you change a line, re-read the surrounding paragraph and confirm the change still flows. When you change a paragraph, re-read the surrounding section. Patches that fix one line and break the next are net negative.
+ 5. **Maintain the constraints while you revise.**
+    - Hold the specified voice, tense, and POV throughout the revision.
+-   - Stay within ±10% of the word count target (${wordCountTarget.toLocaleString()} words).
++   - Stay within ${formatToleranceForPrompt('review')} of the word count target (${wordCountTarget.toLocaleString()} words).
+    - Honor every cited factual detail in the bibles and the continuity state.
+    - Keep subject depictions consistent with the public record. **Never introduce fabricated dialogue, interior, sensory texture, or named participants** while revising — the editor's no-fabrication standard applies to your edits too.
+ 6. **Do not re-architect.** Do not refactor sections or rewrite the chapter wholesale unless a CRITICAL comment specifically requires it. Targeted craft revision; not a redraft.
+@@ -56,7 +57,7 @@ Apply each step. Apply each to every flagged passage, not only the first.
+ 3. **Revise integratively.** When you change a line, re-read the surrounding paragraph and confirm the change still flows. When you change a paragraph, re-read the surrounding scene. Patches that fix one line and break the next are net negative.
+ 4. **Maintain the constraints while you revise.**
+    - Hold the specified voice, tense, and POV throughout the revision.
+-   - Stay within ±10% of the word count target (${wordCountTarget.toLocaleString()} words).
++   - Stay within ${formatToleranceForPrompt('review')} of the word count target (${wordCountTarget.toLocaleString()} words).
+    - Honor every continuity detail: the bibles and any continuity state from prior chapters.
+    - Keep character voices consistent with the character bible.
+ 5. **Do not re-architect.** Do not refactor scenes or rewrite the chapter wholesale unless a CRITICAL comment specifically requires it. Targeted craft revision; not a redraft.
+@@ -70,7 +71,7 @@ Before staging, read your revised draft once end to end. Confirm:
+ 
+ - Every CRITICAL and MAJOR comment is addressed.
+ - Tense and POV hold throughout — no new slips introduced by the edits.
+-- Word count is within ±10% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${formatToleranceForPrompt('review')} of ${wordCountTarget.toLocaleString()}.
+ - Every direct quote in the revised passages still names its publication source.
+ - Every analytical inference in the revised passages is explicitly hedged.
+ - No new invented texture (dialogue, interior, sensory detail, named participants) was introduced anywhere — including the parts you didn't touch (it is easy to drift).
+@@ -83,7 +84,7 @@ Before staging, read your revised draft once end to end. Confirm:
+ 
+ - Every CRITICAL and MAJOR comment is addressed.
+ - Tense and POV hold throughout — no new slips introduced by the edits.
+-- Word count is within ±10% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${formatToleranceForPrompt('review')} of ${wordCountTarget.toLocaleString()}.
+ - The continuity state is still honored — no new contradictions.
+ - The prose around each edit still flows naturally with the edit in place.
+ - No new instances of the AI-prose anti-patterns (filtering verbs, body clichés, empty modifiers) appeared in your revisions.`;
+@@ -105,7 +106,7 @@ ${buildSharedPreamble()}
+ ## Revision Assignment
+ 
+ - **Revision Round**: ${revisionRound}
+-- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ±10%)
++- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (acceptable range: ${formatToleranceForPrompt('review')})
+ 
+ ## Style Guide
+ 
+diff --git a/packages/core/src/prompts/writer.ts b/packages/core/src/prompts/writer.ts
+index a1a3f47..8c82cc6 100644
+--- a/packages/core/src/prompts/writer.ts
++++ b/packages/core/src/prompts/writer.ts
+@@ -3,6 +3,7 @@ import type { Style } from '../config/types.js';
+ import { ProjectType } from '../config/schemas.js';
+ import { pruneContinuityState } from '../writing/continuity.js';
+ import { buildSharedPreamble } from './shared.js';
++import { formatToleranceForPrompt } from '../word-count-policy/index.js';
+ 
+ export interface WriterPromptParams {
+   chapterNumber: number;
+@@ -277,7 +278,7 @@ Apply each step. Do not skip the prep — chapters written cold are visibly chap
+ 1. **Prepare and research.** Before drafting, read the chapter summaries for all prior chapters and read the full text of your predecessor chapters${predecessorChapters.length > 0 ? ' (listed in Story Dependencies above)' : ' (the immediately prior chapter, if any)'}. Consult the subject bible for every subject you will write about. Consult the institutional landscape for every entity the chapter touches. Open \`notes/research-notes.md\` to the per-chapter source notes for this chapter; **use WebSearch / WebFetch to verify the chapter's named facts, quotes, and dates** before you commit them to the prose. Cache new findings (URL + accessed date) into the research notes.
+ 2. **Begin the file** with the heading: \`# Chapter ${chapterNumber}: <title from outline>\` on the first line.
+ 3. **Write full prose.** No bullet points, no outlines, no notes inside the file. Every paragraph is narrative or analytical prose.
+-4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (±5%). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
++4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (${formatToleranceForPrompt('writer')}). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
+ 5. **Honor the citations the bibles establish.** Quote subjects only verbatim from cited publications. Name organizations as the bible names them. Use dates the bible has sourced.
+ 6. **Hedge analytical inferences explicitly.** When the public record does not establish a claim, render it as inference: "publicly described as", "by their own account", "according to the company's website", "in a press release dated".
+ 7. **Do not invent.** No fabricated dialogue, no fabricated interior, no fabricated sensory detail, no fabricated named participants. The Editor's first criterion is sourcing discipline; an invented detail flagged on round-1 is a guaranteed revision round.
+@@ -291,7 +292,7 @@ Apply each step. Do not skip the prep — chapters written cold are visibly chap
+ 1. **Prepare.** Before drafting, read the chapter summaries for all prior chapters and read the full text of your predecessor chapters${predecessorChapters.length > 0 ? ' (listed in Story Dependencies above)' : ' (the immediately prior chapter, if any)'}. Consult the character bible for every character you will write. Consult the world bible for every location and rule the chapter touches. Consult the continuity state above.
+ 2. **Begin the file** with the heading: \`# Chapter ${chapterNumber}: <title from outline>\` on the first line.
+ 3. **Write full prose.** No bullet points, no outlines, no notes inside the file. Every paragraph is narrative prose.
+-4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (±5%). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
++4. **Hit the word count target** of ${wordCountTarget.toLocaleString()} words (${formatToleranceForPrompt('writer')}). Before committing, verify with \`wc -w ${chapterFile}\`. The target is a guide, not a quota — within range is enough.
+ 5. **Maintain continuity.** Honor every character status, location, timeline event, and world-state detail in the continuity state above. Honor the bibles.
+ 6. **Keep voices consistent** with the character bible's voice signatures.
+ 7. **Respect the world-rule costs and limits** from the world bible.
+@@ -305,7 +306,7 @@ Apply each step. Do not skip the prep — chapters written cold are visibly chap
+ Read your draft once before staging. Catch these classes of issue while you can fix them:
+ 
+ - Tense and POV hold throughout — no slips into present tense for "vivid" passages, no narrative-omniscient interior on real subjects.
+-- Word count is within ±5% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${formatToleranceForPrompt('writer')} of ${wordCountTarget.toLocaleString()}.
+ - Every direct quote names its publication source in the prose.
+ - Every analytical inference is explicitly hedged.
+ - No invented texture: no fabricated dialogue, interior, sensory detail, or named participants in undocumented meetings.
+@@ -319,7 +320,7 @@ Read your draft once before staging. Catch these classes of issue while you can
+ Read your draft once before staging. Catch these classes of issue while you can fix them:
+ 
+ - Tense and POV hold throughout — no slips.
+-- Word count is within ±5% of ${wordCountTarget.toLocaleString()}.
++- Word count is within ${formatToleranceForPrompt('writer')} of ${wordCountTarget.toLocaleString()}.
+ - Every scene has an objective, an obstacle, an escalation, and a turn.
+ - The opening is in motion; the close has weight.
+ - The continuity state is honored — no contradictions.
+@@ -337,7 +338,7 @@ ${buildSharedPreamble()}
+ 
+ - **Chapter Number**: ${chapterNumber}
+ - **Output File**: \`${chapterFile}\`
+-- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (aim for ±5%)
++- **Word Count Target**: ${wordCountTarget.toLocaleString()} words (aim for ${formatToleranceForPrompt('writer')})
+ 
+ ## Style Guide
+ 
+diff --git a/packages/core/src/queue/index.ts b/packages/core/src/queue/index.ts
+index f291e73..8516a13 100644
+--- a/packages/core/src/queue/index.ts
++++ b/packages/core/src/queue/index.ts
+@@ -14,6 +14,8 @@ export type {
+   TriggerNextChapterItem,
+   ReconcileSweepItem,
+   FinalReviewItem,
++  PackageManuscriptItem,
++  GenerateListingItem,
+   WorkItem,
+ } from './types.js';
+ 
+@@ -33,6 +35,8 @@ export {
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
++  GenerateListingSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+diff --git a/packages/core/src/queue/schemas.ts b/packages/core/src/queue/schemas.ts
+index 6b43fb3..e0d74e5 100644
+--- a/packages/core/src/queue/schemas.ts
++++ b/packages/core/src/queue/schemas.ts
+@@ -94,6 +94,18 @@ export const FinalReviewSchema = z.object({
+   projectId: z.string().min(1),
+ });
+ 
++export const PackageManuscriptSchema = z.object({
++  type: z.literal('PACKAGE_MANUSCRIPT'),
++  projectId: z.string().min(1),
++  runId: z.string().optional(),
++});
++
++export const GenerateListingSchema = z.object({
++  type: z.literal('GENERATE_LISTING'),
++  projectId: z.string().min(1),
++  runId: z.string().optional(),
++});
++
+ export const WorkItemSchema = z.discriminatedUnion('type', [
+   BootstrapProjectSchema,
+   BootstrapRepoSchema,
+@@ -111,4 +123,6 @@ export const WorkItemSchema = z.discriminatedUnion('type', [
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
++  GenerateListingSchema,
+ ]);
+diff --git a/packages/core/src/queue/types.ts b/packages/core/src/queue/types.ts
+index a0da274..9c41656 100644
+--- a/packages/core/src/queue/types.ts
++++ b/packages/core/src/queue/types.ts
+@@ -16,6 +16,8 @@ import type {
+   TriggerNextChapterSchema,
+   ReconcileSweepSchema,
+   FinalReviewSchema,
++  PackageManuscriptSchema,
++  GenerateListingSchema,
+   WorkItemSchema,
+ } from './schemas.js';
+ 
+@@ -35,5 +37,7 @@ export type ContinuityFixItem = z.infer<typeof ContinuityFixSchema>;
+ export type TriggerNextChapterItem = z.infer<typeof TriggerNextChapterSchema>;
+ export type ReconcileSweepItem = z.infer<typeof ReconcileSweepSchema>;
+ export type FinalReviewItem = z.infer<typeof FinalReviewSchema>;
++export type PackageManuscriptItem = z.infer<typeof PackageManuscriptSchema>;
++export type GenerateListingItem = z.infer<typeof GenerateListingSchema>;
+ 
+ export type WorkItem = z.infer<typeof WorkItemSchema>;
+diff --git a/packages/core/src/release-policy/__tests__/release-policy.test.ts b/packages/core/src/release-policy/__tests__/release-policy.test.ts
+new file mode 100644
+index 0000000..cdd4c50
+--- /dev/null
++++ b/packages/core/src/release-policy/__tests__/release-policy.test.ts
+@@ -0,0 +1,414 @@
++import { describe, it, expect } from 'vitest';
++import {
++  validateListing,
++  type KdpListing,
++  REQUIRED_KEYWORD_COUNT,
++  REQUIRED_CATEGORY_COUNT,
++  MAX_BLURB_LENGTH,
++  ALLOWED_BLURB_TAGS,
++} from '../index.js';
++
++const validListing: KdpListing = {
++  title: 'Test Title',
++  subtitle: 'Test Subtitle',
++  blurb: 'This is a test blurb that is valid and contains no issues.',
++  keywords: ['key1', 'key2', 'key3', 'key4', 'key5', 'key6', 'key7'],
++  categories: ['cat1', 'cat2', 'cat3'],
++  author: 'John Doe',
++};
++
++describe('validateListing', () => {
++  describe('valid listing', () => {
++    it('returns valid: true with empty errors for a valid listing', () => {
++      const result = validateListing(validListing);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('allows optional subtitle to be undefined', () => {
++      const listing = { ...validListing, subtitle: undefined };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('accepts blurb with allowed HTML tags', () => {
++      const listing = {
++        ...validListing,
++        blurb: 'This has <b>bold</b>, <i>italic</i>, and <br/> tags.',
++      };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++  });
++
++  describe('BLURB_TOO_LONG', () => {
++    it('detects blurb exceeding 4000 characters', () => {
++      const longBlurb = 'a'.repeat(MAX_BLURB_LENGTH + 1);
++      const listing = { ...validListing, blurb: longBlurb };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'BLURB_TOO_LONG',
++        }),
++      );
++    });
++
++    it('allows blurb exactly at 4000 characters', () => {
++      const blurb = 'a'.repeat(MAX_BLURB_LENGTH);
++      const listing = { ...validListing, blurb };
++      const result = validateListing(listing);
++      const hasBlurbTooLong = result.errors.some((e) => e.code === 'BLURB_TOO_LONG');
++      expect(hasBlurbTooLong).toBe(false);
++    });
++
++    it('includes character count in error detail', () => {
++      const longBlurb = 'a'.repeat(MAX_BLURB_LENGTH + 100);
++      const listing = { ...validListing, blurb: longBlurb };
++      const result = validateListing(listing);
++      const error = result.errors.find((e) => e.code === 'BLURB_TOO_LONG');
++      expect(error?.detail).toContain('4100');
++    });
++  });
++
++  describe('BLURB_EMPTY', () => {
++    it('detects empty blurb', () => {
++      const listing = { ...validListing, blurb: '' };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'BLURB_EMPTY',
++        }),
++      );
++    });
++
++    it('detects whitespace-only blurb', () => {
++      const listing = { ...validListing, blurb: '   \n\t  ' };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'BLURB_EMPTY',
++        }),
++      );
++    });
++  });
++
++  describe('KEYWORD_COUNT', () => {
++    it('detects too few keywords', () => {
++      const listing = { ...validListing, keywords: ['key1', 'key2'] };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'KEYWORD_COUNT',
++          detail: expect.stringContaining('Expected exactly 7'),
++        }),
++      );
++    });
++
++    it('detects too many keywords', () => {
++      const listing = {
++        ...validListing,
++        keywords: Array.from({ length: 10 }, (_, i) => `key${i}`),
++      };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'KEYWORD_COUNT',
++        }),
++      );
++    });
++
++    it('accepts exactly 7 keywords', () => {
++      const listing = {
++        ...validListing,
++        keywords: Array.from({ length: REQUIRED_KEYWORD_COUNT }, (_, i) => `key${i}`),
++      };
++      const result = validateListing(listing);
++      const hasKeywordCountError = result.errors.some((e) => e.code === 'KEYWORD_COUNT');
++      expect(hasKeywordCountError).toBe(false);
++    });
++  });
++
++  describe('CATEGORY_COUNT', () => {
++    it('detects too few categories', () => {
++      const listing = { ...validListing, categories: ['cat1'] };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'CATEGORY_COUNT',
++          detail: expect.stringContaining('Expected exactly 3'),
++        }),
++      );
++    });
++
++    it('detects too many categories', () => {
++      const listing = {
++        ...validListing,
++        categories: ['cat1', 'cat2', 'cat3', 'cat4', 'cat5'],
++      };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'CATEGORY_COUNT',
++        }),
++      );
++    });
++
++    it('accepts exactly 3 categories', () => {
++      const listing = {
++        ...validListing,
++        categories: Array.from({ length: REQUIRED_CATEGORY_COUNT }, (_, i) => `cat${i}`),
++      };
++      const result = validateListing(listing);
++      const hasCategoryCountError = result.errors.some((e) => e.code === 'CATEGORY_COUNT');
++      expect(hasCategoryCountError).toBe(false);
++    });
++  });
++
++  describe('UNRESOLVED_PLACEHOLDER', () => {
++    it('detects TODO: in title', () => {
++      const listing = { ...validListing, title: 'TODO: Add title' };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'UNRESOLVED_PLACEHOLDER',
++        }),
++      );
++    });
++
++    it('detects TODO: in subtitle', () => {
++      const listing = { ...validListing, subtitle: 'TODO: Add subtitle' };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'UNRESOLVED_PLACEHOLDER',
++        }),
++      );
++    });
++
++    it('detects TODO: in blurb', () => {
++      const listing = { ...validListing, blurb: 'This is TODO: incomplete.' };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'UNRESOLVED_PLACEHOLDER',
++        }),
++      );
++    });
++
++    it('detects TODO: in author', () => {
++      const listing = { ...validListing, author: 'TODO: Get author' };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'UNRESOLVED_PLACEHOLDER',
++        }),
++      );
++    });
++
++    it('detects TODO: in keywords', () => {
++      const listing = {
++        ...validListing,
++        keywords: ['key1', 'TODO: Add keyword', 'key3', 'key4', 'key5', 'key6', 'key7'],
++      };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'UNRESOLVED_PLACEHOLDER',
++        }),
++      );
++    });
++
++    it('detects TODO: in categories', () => {
++      const listing = {
++        ...validListing,
++        categories: ['cat1', 'TODO: Fix category', 'cat3'],
++      };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'UNRESOLVED_PLACEHOLDER',
++        }),
++      );
++    });
++
++    it('reports one error total even if multiple fields have TODO:', () => {
++      const listing = {
++        ...validListing,
++        title: 'TODO: Title',
++        author: 'TODO: Author',
++        keywords: ['TODO: Key', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7'],
++      };
++      const result = validateListing(listing);
++      const todoErrors = result.errors.filter((e) => e.code === 'UNRESOLVED_PLACEHOLDER');
++      expect(todoErrors).toHaveLength(1);
++    });
++  });
++
++  describe('DISALLOWED_HTML', () => {
++    it('detects disallowed HTML tag <div>', () => {
++      const listing = { ...validListing, blurb: 'This has <div>content</div>.' };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'DISALLOWED_HTML',
++          detail: expect.stringContaining('div'),
++        }),
++      );
++    });
++
++    it('detects disallowed HTML tag <span>', () => {
++      const listing = { ...validListing, blurb: 'This has <span>text</span>.' };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'DISALLOWED_HTML',
++        }),
++      );
++    });
++
++    it('allows all tags in the allowlist', () => {
++      const tagString = ALLOWED_BLURB_TAGS.map((tag) => `<${tag}>content</${tag}>`).join(' ');
++      const listing = { ...validListing, blurb: tagString };
++      const result = validateListing(listing);
++      const hasHtmlError = result.errors.some((e) => e.code === 'DISALLOWED_HTML');
++      expect(hasHtmlError).toBe(false);
++    });
++
++    it('is case-insensitive in tag matching', () => {
++      const listing = { ...validListing, blurb: 'This has <DIV>content</DIV>.' };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'DISALLOWED_HTML',
++        }),
++      );
++    });
++
++    it('recognizes closing tags as the same tag', () => {
++      const listing = { ...validListing, blurb: 'This has </span> without opening.' };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'DISALLOWED_HTML',
++        }),
++      );
++    });
++
++    it('reports only one error total even with multiple disallowed tags', () => {
++      const listing = {
++        ...validListing,
++        blurb: 'This has <div>content</div> and <span>more</span>.',
++      };
++      const result = validateListing(listing);
++      const htmlErrors = result.errors.filter((e) => e.code === 'DISALLOWED_HTML');
++      expect(htmlErrors).toHaveLength(1);
++    });
++
++    it('allows self-closing br tag', () => {
++      const listing = { ...validListing, blurb: 'Line 1<br/>Line 2' };
++      const result = validateListing(listing);
++      const hasHtmlError = result.errors.some((e) => e.code === 'DISALLOWED_HTML');
++      expect(hasHtmlError).toBe(false);
++    });
++  });
++
++  describe('error sorting', () => {
++    it('sorts errors by code in ascending lexicographic order', () => {
++      const listing = {
++        title: 'Test',
++        blurb: '', // BLURB_EMPTY, BLURB_TOO_LONG (no, empty doesn't trigger TOO_LONG)
++        keywords: [], // KEYWORD_COUNT
++        categories: [], // CATEGORY_COUNT
++        author: 'Author',
++      };
++      const result = validateListing(listing);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes).toEqual([...codes].sort());
++    });
++
++    it('correctly orders BLURB_EMPTY, CATEGORY_COUNT, KEYWORD_COUNT', () => {
++      const listing = {
++        title: 'Test',
++        blurb: '',
++        keywords: ['k1'],
++        categories: ['c1'],
++        author: 'Author',
++      };
++      const result = validateListing(listing);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes[0]).toBe('BLURB_EMPTY');
++      expect(codes.indexOf('CATEGORY_COUNT')).toBeLessThan(codes.indexOf('KEYWORD_COUNT'));
++    });
++  });
++
++  describe('multiple errors', () => {
++    it('reports all applicable errors', () => {
++      const longBlurb = 'a'.repeat(MAX_BLURB_LENGTH + 1);
++      const listing = {
++        title: 'Title',
++        blurb: longBlurb, // BLURB_TOO_LONG
++        keywords: ['k1', 'k2'], // KEYWORD_COUNT
++        categories: ['c1'], // CATEGORY_COUNT
++        author: 'Author',
++      };
++      const result = validateListing(listing);
++      expect(result.valid).toBe(false);
++      expect(result.errors.length).toBeGreaterThanOrEqual(3);
++    });
++
++    it('reports all six possible error codes when all validations fail', () => {
++      const listing = {
++        title: 'TODO: Title',
++        subtitle: undefined,
++        blurb: 'a'.repeat(MAX_BLURB_LENGTH + 1) + '<div>test</div>', // BLURB_TOO_LONG, DISALLOWED_HTML
++        keywords: ['k1'], // KEYWORD_COUNT
++        categories: ['c1'], // CATEGORY_COUNT
++        author: 'Author',
++      };
++      const result = validateListing(listing);
++      const codes = result.errors.map((e) => e.code);
++      expect(result.valid).toBe(false);
++      expect(codes).toContain('BLURB_TOO_LONG');
++      expect(codes).toContain('CATEGORY_COUNT');
++      expect(codes).toContain('DISALLOWED_HTML');
++      expect(codes).toContain('KEYWORD_COUNT');
++      expect(codes).toContain('UNRESOLVED_PLACEHOLDER');
++    });
++  });
++
++  describe('error details', () => {
++    it('includes helpful error messages', () => {
++      const listing = {
++        title: 'Title',
++        blurb: '',
++        keywords: ['k1'],
++        categories: ['c1'],
++        author: 'Author',
++      };
++      const result = validateListing(listing);
++      for (const error of result.errors) {
++        expect(error.detail).toBeTruthy();
++        expect(error.detail.length).toBeGreaterThan(0);
++      }
++    });
++  });
++});
+diff --git a/packages/core/src/release-policy/__tests__/validate-manuscript.test.ts b/packages/core/src/release-policy/__tests__/validate-manuscript.test.ts
+new file mode 100644
+index 0000000..ae8a32d
+--- /dev/null
++++ b/packages/core/src/release-policy/__tests__/validate-manuscript.test.ts
+@@ -0,0 +1,634 @@
++import { describe, it, expect } from 'vitest';
++import {
++  validateManuscriptStructure,
++  type ChapterFile,
++} from '../index.js';
++
++describe('validateManuscriptStructure', () => {
++  describe('valid manuscript', () => {
++    it('returns valid: true with empty errors for a valid manuscript', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Introduction\n\nSome content here.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 2: Getting Started\n\nMore content.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('accepts chapters with empty lines before H1', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '\n\n# Chapter 1: First Chapter\n\nContent goes here.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('accepts chapters with content after H1', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Title\n\n## Section\n\nParagraph 1\n\nParagraph 2',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('accepts single chapter', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Only Chapter\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('accepts multiple chapters numbered sequentially', () => {
++      const chapters: ChapterFile[] = Array.from({ length: 5 }, (_, i) => ({
++        path: `manuscript/chapter-${String(i + 1).padStart(2, '0')}.md`,
++        content: `# Chapter ${i + 1}: Chapter Title\n\nContent.`,
++      }));
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++  });
++
++  describe('H1_MISSING', () => {
++    it('detects missing H1 heading', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'Just some content without a heading.\n\nNo H1 here.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'H1_MISSING',
++        }),
++      );
++    });
++
++    it('detects when only lower-level headings exist', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '## Section Heading\n\nContent here.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'H1_MISSING',
++        }),
++      );
++    });
++
++    it('skips H1_MALFORMED and H1_NUMBER_MISMATCH but checks H1_NOT_FIRST if H1_MISSING', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'No heading here at all.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes).toContain('H1_MISSING');
++      expect(codes).toContain('H1_NOT_FIRST');
++      expect(codes).not.toContain('H1_MALFORMED');
++      expect(codes).not.toContain('H1_NUMBER_MISMATCH');
++    });
++  });
++
++  describe('H1_NOT_FIRST', () => {
++    it('detects when H1 is not on first non-empty line', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'Some text before\n# Chapter 1: Title\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'H1_NOT_FIRST',
++        }),
++      );
++    });
++
++    it('allows empty lines before H1', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '\n\n# Chapter 1: Title\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasH1NotFirst = result.errors.some((e) => e.code === 'H1_NOT_FIRST');
++      expect(hasH1NotFirst).toBe(false);
++    });
++
++    it('allows whitespace-only lines before H1', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '   \n\t\n# Chapter 1: Title\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasH1NotFirst = result.errors.some((e) => e.code === 'H1_NOT_FIRST');
++      expect(hasH1NotFirst).toBe(false);
++    });
++  });
++
++  describe('H1_MALFORMED', () => {
++    it('detects heading not matching pattern "# Chapter <N>: <Title>"', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Just a Title\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'H1_MALFORMED',
++        }),
++      );
++    });
++
++    it('detects heading with non-numeric chapter number', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter ABC: Title\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'H1_MALFORMED',
++        }),
++      );
++    });
++
++    it('detects heading with no title after colon', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1:\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'H1_MALFORMED',
++        }),
++      );
++    });
++
++    it('detects heading with only whitespace as title', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1:    \n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'H1_MALFORMED',
++        }),
++      );
++    });
++
++    it('accepts heading with correct pattern', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Introduction to Everything\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasMalformed = result.errors.some((e) => e.code === 'H1_MALFORMED');
++      expect(hasMalformed).toBe(false);
++    });
++
++    it('accepts heading with spaces around colon', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1 : Title\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasMalformed = result.errors.some((e) => e.code === 'H1_MALFORMED');
++      expect(hasMalformed).toBe(false);
++    });
++
++    it('accepts chapter numbers with multiple digits', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-99.md',
++          content: '# Chapter 99: Nearly Done\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasMalformed = result.errors.some((e) => e.code === 'H1_MALFORMED');
++      expect(hasMalformed).toBe(false);
++    });
++  });
++
++  describe('H1_NUMBER_MISMATCH', () => {
++    it('detects mismatch between heading number and path number', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 2: Wrong Number\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'H1_NUMBER_MISMATCH',
++          detail: expect.stringContaining('2'),
++        }),
++      );
++    });
++
++    it('includes both path and heading numbers in error detail', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-05.md',
++          content: '# Chapter 3: Incorrect\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const error = result.errors.find((e) => e.code === 'H1_NUMBER_MISMATCH');
++      expect(error?.detail).toContain('3');
++      expect(error?.detail).toContain('5');
++    });
++
++    it('accepts matching chapter numbers', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: Correct\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasNumberMismatch = result.errors.some((e) => e.code === 'H1_NUMBER_MISMATCH');
++      expect(hasNumberMismatch).toBe(false);
++    });
++
++    it('skips H1_NUMBER_MISMATCH if H1_MISSING', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'No heading.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasNumberMismatch = result.errors.some((e) => e.code === 'H1_NUMBER_MISMATCH');
++      expect(hasNumberMismatch).toBe(false);
++    });
++  });
++
++  describe('CHAPTER_DUPLICATE', () => {
++    it('detects duplicate chapter numbers', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 1: Also First\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'CHAPTER_DUPLICATE',
++          detail: expect.stringContaining('1'),
++        }),
++      );
++    });
++
++    it('detects when three chapters have the same number', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 1: Also First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 1: Still First\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const dupErrors = result.errors.filter((e) => e.code === 'CHAPTER_DUPLICATE');
++      expect(dupErrors.length).toBeGreaterThanOrEqual(2);
++    });
++
++    it('does not report duplicate if only one valid chapter with that number', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: 'No heading here.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasDuplicate = result.errors.some((e) => e.code === 'CHAPTER_DUPLICATE');
++      expect(hasDuplicate).toBe(false);
++    });
++  });
++
++  describe('CHAPTER_GAP', () => {
++    it('detects gap in chapter sequence', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Third\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'CHAPTER_GAP',
++        }),
++      );
++    });
++
++    it('detects sequence not starting at 1', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 2: Second\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Third\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(false);
++      expect(result.errors).toContainEqual(
++        expect.objectContaining({
++          code: 'CHAPTER_GAP',
++        }),
++      );
++    });
++
++    it('accepts consecutive chapters 1..n', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 2: Second\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Third\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasGap = result.errors.some((e) => e.code === 'CHAPTER_GAP');
++      expect(hasGap).toBe(false);
++    });
++
++    it('handles unordered input chapters', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Third\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 2: Second\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasGap = result.errors.some((e) => e.code === 'CHAPTER_GAP');
++      expect(hasGap).toBe(false);
++    });
++
++    it('does not report CHAPTER_GAP if no valid chapters', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'No heading here.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const hasGap = result.errors.some((e) => e.code === 'CHAPTER_GAP');
++      expect(hasGap).toBe(false);
++    });
++
++    it('includes chapter numbers in error detail', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 3: Third\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const error = result.errors.find((e) => e.code === 'CHAPTER_GAP');
++      expect(error?.detail).toContain('1');
++      expect(error?.detail).toContain('3');
++    });
++  });
++
++  describe('error sorting', () => {
++    it('sorts errors by code in ascending lexicographic order', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'No heading.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 1: Wrong Number\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes).toEqual([...codes].sort());
++    });
++
++    it('correctly orders CHAPTER_DUPLICATE and CHAPTER_GAP', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: '# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-02.md',
++          content: '# Chapter 1: Also First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-04.md',
++          content: '# Chapter 3: Third\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const codes = result.errors.map((e) => e.code);
++      const dupIdx = codes.indexOf('CHAPTER_DUPLICATE');
++      const gapIdx = codes.indexOf('CHAPTER_GAP');
++      if (dupIdx !== -1 && gapIdx !== -1) {
++        expect(dupIdx).toBeLessThan(gapIdx);
++      }
++    });
++
++    it('correctly orders H1_MALFORMED and H1_NOT_FIRST', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'Text\n# Invalid heading\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const codes = result.errors.map((e) => e.code);
++      const malformedIdx = codes.indexOf('H1_MALFORMED');
++      const notFirstIdx = codes.indexOf('H1_NOT_FIRST');
++      expect(malformedIdx).toBeLessThan(notFirstIdx);
++    });
++  });
++
++  describe('empty manuscript', () => {
++    it('returns valid: true for empty chapters array', () => {
++      const chapters: ChapterFile[] = [];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++  });
++
++  describe('malformed paths', () => {
++    it('ignores chapters with non-conforming path patterns', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'not-manuscript/chapter-01.md',
++          content: '# No validation if path is wrong',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++
++    it('ignores chapters with wrong naming format', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/ch-01.md',
++          content: '# Also not validated',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      expect(result.valid).toBe(true);
++      expect(result.errors).toHaveLength(0);
++    });
++  });
++
++  describe('multiple errors', () => {
++    it('reports all applicable errors', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-02.md',
++          content: 'Text\n# Chapter 1: First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-03.md',
++          content: '# Chapter 1: Also First\n\nContent.',
++        },
++        {
++          path: 'manuscript/chapter-05.md',
++          content: '# Chapter 3: Third\n\nContent.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const codes = result.errors.map((e) => e.code);
++      expect(codes).toContain('CHAPTER_DUPLICATE');
++      expect(codes).toContain('CHAPTER_GAP');
++      expect(codes).toContain('H1_NOT_FIRST');
++      expect(codes).toContain('H1_NUMBER_MISMATCH');
++    });
++  });
++
++  describe('error details', () => {
++    it('includes helpful error messages', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'No heading.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      for (const error of result.errors) {
++        expect(error.detail).toBeTruthy();
++        expect(error.detail.length).toBeGreaterThan(0);
++      }
++    });
++
++    it('includes path in error detail for per-chapter errors', () => {
++      const chapters: ChapterFile[] = [
++        {
++          path: 'manuscript/chapter-01.md',
++          content: 'No heading.',
++        },
++      ];
++      const result = validateManuscriptStructure(chapters);
++      const error = result.errors[0];
++      expect(error?.detail).toContain('chapter-01.md');
++    });
++  });
++});
+diff --git a/packages/core/src/release-policy/index.ts b/packages/core/src/release-policy/index.ts
+new file mode 100644
+index 0000000..3c03826
+--- /dev/null
++++ b/packages/core/src/release-policy/index.ts
+@@ -0,0 +1,9 @@
++export type { KdpListing, ListingError, ListingValidation, ChapterFile, ManuscriptError, ManuscriptValidation } from './types.js';
++export {
++  MAX_BLURB_LENGTH,
++  REQUIRED_KEYWORD_COUNT,
++  REQUIRED_CATEGORY_COUNT,
++  ALLOWED_BLURB_TAGS,
++} from './types.js';
++export { validateListing } from './validate.js';
++export { validateManuscriptStructure } from './validate-manuscript.js';
+diff --git a/packages/core/src/release-policy/types.ts b/packages/core/src/release-policy/types.ts
+new file mode 100644
+index 0000000..7d01934
+--- /dev/null
++++ b/packages/core/src/release-policy/types.ts
+@@ -0,0 +1,38 @@
++export interface KdpListing {
++  title: string;
++  subtitle?: string | undefined;
++  blurb: string;
++  keywords: string[];
++  categories: string[];
++  author: string;
++}
++
++export interface ListingError {
++  code: string;
++  detail: string;
++}
++
++export interface ListingValidation {
++  valid: boolean;
++  errors: ListingError[];
++}
++
++export interface ChapterFile {
++  path: string;
++  content: string;
++}
++
++export interface ManuscriptError {
++  code: string;
++  detail: string;
++}
++
++export interface ManuscriptValidation {
++  valid: boolean;
++  errors: ManuscriptError[];
++}
++
++export const MAX_BLURB_LENGTH = 4000;
++export const REQUIRED_KEYWORD_COUNT = 7;
++export const REQUIRED_CATEGORY_COUNT = 3;
++export const ALLOWED_BLURB_TAGS = ['b', 'i', 'u', 'br', 'p', 'ul', 'li', 'ol', 'h4', 'h5', 'h6'];
+diff --git a/packages/core/src/release-policy/validate-manuscript.ts b/packages/core/src/release-policy/validate-manuscript.ts
+new file mode 100644
+index 0000000..c683804
+--- /dev/null
++++ b/packages/core/src/release-policy/validate-manuscript.ts
+@@ -0,0 +1,153 @@
++import { getChapterFilePath } from '../writing/paths.js';
++import type { ChapterFile, ManuscriptError, ManuscriptValidation } from './types.js';
++
++export function validateManuscriptStructure(chapters: ChapterFile[]): ManuscriptValidation {
++  const errors: ManuscriptError[] = [];
++  const headingNumbers: number[] = [];
++
++  // Per-chapter validation
++  for (const chapter of chapters) {
++    const pathNumber = extractChapterNumberFromPath(chapter.path);
++
++    // Skip validation if path doesn't match expected pattern
++    if (pathNumber === null) {
++      continue;
++    }
++
++    const h1Match = findH1Heading(chapter.content);
++
++    // H1_MISSING
++    if (!h1Match) {
++      errors.push({
++        code: 'H1_MISSING',
++        detail: `Chapter at path "${chapter.path}" has no level-1 markdown heading.`,
++      });
++
++      // H1_NOT_FIRST: still check even if H1_MISSING (first non-empty line is not an H1)
++      errors.push({
++        code: 'H1_NOT_FIRST',
++        detail: `First non-empty line of chapter at path "${chapter.path}" is not the level-1 heading.`,
++      });
++
++      // Skip rules 3 and 4 (H1_MALFORMED and H1_NUMBER_MISMATCH)
++      continue;
++    }
++
++    // H1_NOT_FIRST
++    if (!isH1First(chapter.content, h1Match)) {
++      errors.push({
++        code: 'H1_NOT_FIRST',
++        detail: `First non-empty line of chapter at path "${chapter.path}" is not the level-1 heading.`,
++      });
++    }
++
++    // H1_MALFORMED and extract heading number
++    const headingMatch = h1Match.match(/^#\s+Chapter\s+(\d+)\s*:\s*(.+)$/);
++    if (!headingMatch) {
++      errors.push({
++        code: 'H1_MALFORMED',
++        detail: `Level-1 heading in chapter at path "${chapter.path}" does not match pattern "# Chapter <N>: <Title>" where <N> is one or more digits and <Title> is non-empty.`,
++      });
++      continue;
++    }
++
++    const headingNumber = parseInt(headingMatch[1] ?? '', 10);
++    const title = headingMatch[2] ?? '';
++
++    // Validate title is non-empty
++    if (!title || title.trim().length === 0) {
++      errors.push({
++        code: 'H1_MALFORMED',
++        detail: `Level-1 heading in chapter at path "${chapter.path}" does not match pattern "# Chapter <N>: <Title>" where <N> is one or more digits and <Title> is non-empty.`,
++      });
++      continue;
++    }
++
++    // H1_NUMBER_MISMATCH
++    if (headingNumber !== pathNumber) {
++      errors.push({
++        code: 'H1_NUMBER_MISMATCH',
++        detail: `Chapter number in heading (${headingNumber}) does not match the chapter number implied by path (${pathNumber}).`,
++      });
++    }
++
++    headingNumbers.push(headingNumber);
++  }
++
++  // Set-level validation
++  // CHAPTER_DUPLICATE
++  const seen = new Set<number>();
++  for (const num of headingNumbers) {
++    if (seen.has(num)) {
++      errors.push({
++        code: 'CHAPTER_DUPLICATE',
++        detail: `Two chapters resolve to chapter number ${num}.`,
++      });
++    }
++    seen.add(num);
++  }
++
++  // CHAPTER_GAP
++  if (headingNumbers.length > 0) {
++    const sorted = [...new Set(headingNumbers)].sort((a, b) => a - b);
++    const maxNum = sorted[sorted.length - 1] ?? 0;
++    const isConsecutive = sorted.every((num, i) => num === i + 1);
++    if (!isConsecutive) {
++      const expected = Array.from({ length: maxNum }, (_, i) => i + 1);
++      const missing = expected.filter((n) => !sorted.includes(n));
++      if (missing.length > 0 || sorted[0] !== 1) {
++        errors.push({
++          code: 'CHAPTER_GAP',
++          detail: `Chapter numbers must form the sequence 1..n with no gaps. Got: ${sorted.join(', ')}.`,
++        });
++      }
++    }
++  }
++
++  // Sort errors by code ascending
++  errors.sort((a, b) => a.code.localeCompare(b.code));
++
++  return {
++    valid: errors.length === 0,
++    errors,
++  };
++}
++
++function extractChapterNumberFromPath(path: string): number | null {
++  // Extract potential chapter number from path using simple pattern
++  const match = path.match(/^manuscript\/chapter-(\d+)\.md$/);
++  if (!match) {
++    return null;
++  }
++  const num = parseInt(match[1] ?? '', 10);
++  if (isNaN(num)) {
++    return null;
++  }
++  // Verify by calling getChapterFilePath to ensure path format is correct
++  // (avoids duplicating the zero-padding logic from getChapterFilePath)
++  if (getChapterFilePath(num) === path) {
++    return num;
++  }
++  return null;
++}
++
++function findH1Heading(content: string): string | undefined {
++  const lines = content.split('\n');
++  for (const line of lines) {
++    if (line.match(/^#\s+/)) {
++      return line;
++    }
++  }
++  return undefined;
++}
++
++function isH1First(content: string, h1: string): boolean {
++  const lines = content.split('\n');
++  for (const line of lines) {
++    if (line.trim().length === 0) {
++      continue;
++    }
++    return line === h1;
++  }
++  return false;
++}
+diff --git a/packages/core/src/release-policy/validate.ts b/packages/core/src/release-policy/validate.ts
+new file mode 100644
+index 0000000..8a4b20c
+--- /dev/null
++++ b/packages/core/src/release-policy/validate.ts
+@@ -0,0 +1,92 @@
++import type { KdpListing, ListingError, ListingValidation } from './types.js';
++import {
++  MAX_BLURB_LENGTH,
++  REQUIRED_KEYWORD_COUNT,
++  REQUIRED_CATEGORY_COUNT,
++  ALLOWED_BLURB_TAGS,
++} from './types.js';
++
++export function validateListing(listing: KdpListing): ListingValidation {
++  const errors: ListingError[] = [];
++
++  // BLURB_TOO_LONG — blurb longer than 4000 characters
++  if (listing.blurb.length > MAX_BLURB_LENGTH) {
++    errors.push({
++      code: 'BLURB_TOO_LONG',
++      detail: `Blurb exceeds maximum length of ${MAX_BLURB_LENGTH} characters (${listing.blurb.length} provided).`,
++    });
++  }
++
++  // BLURB_EMPTY — blurb is empty or whitespace only
++  if (listing.blurb.trim().length === 0) {
++    errors.push({
++      code: 'BLURB_EMPTY',
++      detail: 'Blurb is empty or contains only whitespace.',
++    });
++  }
++
++  // KEYWORD_COUNT — keywords.length is not exactly 7
++  if (listing.keywords.length !== REQUIRED_KEYWORD_COUNT) {
++    errors.push({
++      code: 'KEYWORD_COUNT',
++      detail: `Expected exactly ${REQUIRED_KEYWORD_COUNT} keywords, got ${listing.keywords.length}.`,
++    });
++  }
++
++  // CATEGORY_COUNT — categories.length is not exactly 3
++  if (listing.categories.length !== REQUIRED_CATEGORY_COUNT) {
++    errors.push({
++      code: 'CATEGORY_COUNT',
++      detail: `Expected exactly ${REQUIRED_CATEGORY_COUNT} categories, got ${listing.categories.length}.`,
++    });
++  }
++
++  // UNRESOLVED_PLACEHOLDER — any string field contains "TODO:". One error total, not one per field.
++  const allStringFields = [
++    listing.title,
++    listing.subtitle,
++    listing.blurb,
++    listing.author,
++    ...listing.keywords,
++    ...listing.categories,
++  ];
++  const hasTodo = allStringFields.some((field) => field !== undefined && field.includes('TODO:'));
++  if (hasTodo) {
++    errors.push({
++      code: 'UNRESOLVED_PLACEHOLDER',
++      detail: 'One or more fields contain unresolved "TODO:" placeholders.',
++    });
++  }
++
++  // DISALLOWED_HTML — blurb contains an HTML tag outside allowlist. One error total.
++  const disallowedHtmlTag = findDisallowedHtmlTag(listing.blurb);
++  if (disallowedHtmlTag) {
++    errors.push({
++      code: 'DISALLOWED_HTML',
++      detail: `HTML tag "<${disallowedHtmlTag}>" is not allowed in blurb. Allowed tags: ${ALLOWED_BLURB_TAGS.join(', ')}.`,
++    });
++  }
++
++  // Sort errors by code ascending (lexicographic order)
++  errors.sort((a, b) => a.code.localeCompare(b.code));
++
++  return {
++    valid: errors.length === 0,
++    errors,
++  };
++}
++
++function findDisallowedHtmlTag(text: string): string | undefined {
++  const htmlTagPattern = /<\/?([a-zA-Z][a-zA-Z0-9]*)/g;
++  const allowedTagsLower = ALLOWED_BLURB_TAGS.map((tag) => tag.toLowerCase());
++
++  let match;
++  while ((match = htmlTagPattern.exec(text)) !== null) {
++    const tag = match[1]?.toLowerCase();
++    if (tag !== undefined && !allowedTagsLower.includes(tag)) {
++      return tag;
++    }
++  }
++
++  return undefined;
++}
+diff --git a/packages/core/src/word-count-policy/index.ts b/packages/core/src/word-count-policy/index.ts
+new file mode 100644
+index 0000000..cbd4715
+--- /dev/null
++++ b/packages/core/src/word-count-policy/index.ts
+@@ -0,0 +1,59 @@
++import { WORD_COUNT_DEFAULTS } from '../config/defaults.js';
++import type { ProjectType } from '../config/schemas.js';
++
++export type WordCountStage = 'writer' | 'review' | 'merge';
++
++export function resolveChapterTarget(params: {
++  targetWordCount: number;
++  chapterCount: number;
++}): number {
++  const { targetWordCount, chapterCount } = params;
++  if (chapterCount <= 0) {
++    throw new Error('chapterCount must be positive');
++  }
++  return Math.floor(targetWordCount / chapterCount);
++}
++
++export function resolveTolerance(stage: WordCountStage): number {
++  switch (stage) {
++    case 'writer':
++      return 0.05;
++    case 'review':
++      return 0.10;
++    case 'merge':
++      return 0.20;
++  }
++}
++
++export function resolveWordCountRange(params: {
++  targetWordCount: number;
++  chapterCount: number;
++  stage: WordCountStage;
++}): { min: number; max: number } {
++  const { targetWordCount, chapterCount, stage } = params;
++  const target = resolveChapterTarget({ targetWordCount, chapterCount });
++  const tolerance = resolveTolerance(stage);
++  return {
++    min: Math.floor(target * (1 - tolerance)),
++    max: Math.ceil(target * (1 + tolerance)),
++  };
++}
++
++export function formatToleranceForPrompt(stage: WordCountStage): string {
++  const tolerance = resolveTolerance(stage);
++  const percent = Math.round(tolerance * 100);
++  return `±${percent}%`;
++}
++
++export function clampToProjectType(params: {
++  range: { min: number; max: number };
++  projectType: ProjectType;
++}): { min: number; max: number } {
++  const { range, projectType } = params;
++  const { chapterMin, chapterMax } = WORD_COUNT_DEFAULTS[projectType];
++
++  return {
++    min: Math.min(Math.max(range.min, chapterMin), chapterMax),
++    max: Math.min(Math.max(range.max, chapterMin), chapterMax),
++  };
++}
+diff --git a/packages/lambdas/src/__tests__/integration/concurrency.test.ts b/packages/lambdas/src/__tests__/integration/concurrency.test.ts
+index 6e92874..ada05aa 100644
+--- a/packages/lambdas/src/__tests__/integration/concurrency.test.ts
++++ b/packages/lambdas/src/__tests__/integration/concurrency.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/continuity.test.ts b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+index aab8b67..6fbf999 100644
+--- a/packages/lambdas/src/__tests__/integration/continuity.test.ts
++++ b/packages/lambdas/src/__tests__/integration/continuity.test.ts
+@@ -36,8 +36,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+@@ -88,7 +88,7 @@ beforeEach(() => {
+ describe('Continuity state propagation', () => {
+   it('enqueues TRIGGER_NEXT_CHAPTER after continuity-checker reconcile (state stays in repo)', async () => {
+     // Set up: chapter 1 node with MERGED status, an agent run for the continuity checker
+-    const node1 = makeChapterNode('node-1', 1, { status: 'MERGED', wordCount: 300 });
++    const node1 = makeChapterNode('node-1', 1, { status: 'MERGED', wordCount: 4000 });
+     const graph = makeTaskGraphItem([node1], { version: 2 });
+     store.taskGraphsByProjectVersion.set(PROJECT_ID, new Map([[2, graph]]));
+     store.taskGraphLatestVersion.set(PROJECT_ID, 2);
+diff --git a/packages/lambdas/src/__tests__/integration/escalation.test.ts b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+index 786d7d5..8eede8c 100644
+--- a/packages/lambdas/src/__tests__/integration/escalation.test.ts
++++ b/packages/lambdas/src/__tests__/integration/escalation.test.ts
+@@ -34,8 +34,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+index 1283926..fb95db4 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/pipeline-runner.ts
+@@ -18,6 +18,8 @@ import { handler as continuityCheckHandler } from '../../../handlers/continuity-
+ import { handler as continuityAuditHandler } from '../../../handlers/continuity-audit.js';
+ import { handler as continuityFixerHandler } from '../../../handlers/continuity-fixer.js';
+ import { handler as finalReviewHandler } from '../../../handlers/final-review.js';
++import { handler as packageManuscriptHandler } from '../../../handlers/package-manuscript.js';
++import { handler as generateListingHandler } from '../../../handlers/generate-listing.js';
+ import { handler as reconcileEnqueuerHandler } from '../../../handlers/reconcile-enqueuer.js';
+ 
+ type SQSHandlerFn = (event: SQSEvent, context: never, callback: () => void) => void | Promise<unknown>;
+@@ -38,6 +40,8 @@ const HANDLER_MAP: Record<string, SQSHandlerFn> = {
+   CONTINUITY_AUDIT: continuityAuditHandler,
+   CONTINUITY_FIX: continuityFixerHandler,
+   FINAL_REVIEW: finalReviewHandler,
++  PACKAGE_MANUSCRIPT: packageManuscriptHandler,
++  GENERATE_LISTING: generateListingHandler,
+ };
+ 
+ let _msgCounter = 0;
+diff --git a/packages/lambdas/src/__tests__/integration/helpers/test-data.ts b/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
+index 18dcd2c..da241fd 100644
+--- a/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
++++ b/packages/lambdas/src/__tests__/integration/helpers/test-data.ts
+@@ -5,11 +5,11 @@ export const REPO_NAME = 'the-test-novel';
+ export const REPO_URL = 'https://github.com/test-org/the-test-novel';
+ 
+ /**
+- * Small word count so test content is manageable.
+- * reconcile writer: min = floor(300 * 0.9) = 270, max = ceil(300 * 1.1) = 330
+- * merge-chapter:    min = floor(300 * 0.8) = 240, max = floor(300 * 1.2) = 360
++ * Manageable word count within project type limits (3000-5000 for NOVEL).
++ * reconcile writer: min = floor(4000 * 0.95) = 3800, max = ceil(4000 * 1.05) = 4200
++ * merge-chapter:    min = floor(4000 * 0.8) = 3200, clamped to [3000,5000] → [3200,4000]
+  */
+-export const TARGET_WORD_COUNT = 300;
++export const TARGET_WORD_COUNT = 4000;
+ export const CHAPTER_COUNT = 1;
+ 
+ export const TEST_PROJECT_CONFIG = {
+@@ -30,11 +30,11 @@ export const TEST_PROJECT_CONFIG = {
+   concurrencyLimit: 2,
+ };
+ 
+-/** 300-word chapter content that passes both reconcile (10%) and merge-chapter (20%) tolerances. */
+-export const MOCK_CHAPTER_CONTENT = Array(300).fill('word').join(' ');
++/** 4000-word chapter content that passes both reconcile (5%) and merge-chapter (20%) tolerances. */
++export const MOCK_CHAPTER_CONTENT = Array(4000).fill('word').join(' ');
+ 
+-/** Under-word-count content: 100 words — fails reconcile's 270-word minimum. */
+-export const MOCK_SHORT_CHAPTER_CONTENT = Array(100).fill('word').join(' ');
++/** Under-word-count content: 1000 words — fails reconcile's 3800-word minimum. */
++export const MOCK_SHORT_CHAPTER_CONTENT = Array(1000).fill('word').join(' ');
+ 
+ /** Continuity state returned by the continuity-checker ECS task. */
+ export const MOCK_CONTINUITY_STATE = JSON.stringify({
+@@ -123,6 +123,10 @@ export const BASE_ENV: Record<string, string> = {
+     'arn:aws:ecs:us-east-1:123456789:task-definition/auditor:1',
+   FIXER_TASK_DEF_ARN:
+     'arn:aws:ecs:us-east-1:123456789:task-definition/fixer:1',
++  PACKAGER_TASK_DEF_ARN:
++    'arn:aws:ecs:us-east-1:123456789:task-definition/packager:1',
++  MARKETER_TASK_DEF_ARN:
++    'arn:aws:ecs:us-east-1:123456789:task-definition/marketer:1',
+ };
+ 
+ /** Fake ECS task ARN returned by the mocked launchECSTask. */
+diff --git a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+index 94efdd5..417d12e 100644
+--- a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
++++ b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+@@ -40,8 +40,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+ // Mock ECS launcher — launchECSTask returns a fake ARN; getECSTaskStatus
+ // returns STOPPED/0 to simulate immediate successful task completion
+ // ---------------------------------------------------------------------------
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+@@ -86,6 +86,16 @@ beforeEach(() => {
+   fileContents.set('notes/task-graph.json', SINGLE_CHAPTER_TASK_GRAPH_JSON);
+   fileContents.set('manuscript/chapter-01.md', MOCK_CHAPTER_CONTENT);
+   fileContents.set('notes/continuity-state.json', MOCK_CONTINUITY_STATE);
++
++  // Valid listing.json for marketer validation
++  const validListing = {
++    title: 'The Test Novel',
++    blurb: 'A compelling story about heroes and adventure.',
++    keywords: ['fantasy', 'adventure', 'quest', 'magic', 'epic', 'journey', 'sword'],
++    categories: ['Fantasy', 'Adventure', 'Science Fiction'],
++    author: 'Jordan Vale',
++  };
++  fileContents.set('release/listing.json', JSON.stringify(validListing));
+ });
+ 
+ // ---------------------------------------------------------------------------
+@@ -98,7 +108,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       type: 'BOOTSTRAP_PROJECT',
+       projectId: PROJECT_ID,
+       issueNumber: 42,
+-      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 300\nchapterCount: 1',
++      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 4000\nchapterCount: 1',
+     });
+ 
+     expect(pendingQueue).toHaveLength(1);
+@@ -130,13 +140,13 @@ describe('Full pipeline flow (1-chapter project)', () => {
+     expect(project!.repoUrl).toBe('https://github.com/test-org/the-test-novel');
+   });
+ 
+-  it('runs the full pipeline end-to-end through CONTINUITY_AUDIT to FINAL_REVIEW', async () => {
++  it('runs the full pipeline end-to-end through CONTINUITY_AUDIT to GENERATE_LISTING', async () => {
+     // Kick off from BOOTSTRAP_PROJECT
+     pendingQueue.push({
+       type: 'BOOTSTRAP_PROJECT',
+       projectId: PROJECT_ID,
+       issueNumber: 42,
+-      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 300\nchapterCount: 1',
++      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 4000\nchapterCount: 1',
+     });
+ 
+     await runAll();
+@@ -144,16 +154,18 @@ describe('Full pipeline flow (1-chapter project)', () => {
+     // Verify final pipeline output
+     expect(pendingQueue).toHaveLength(0);
+ 
+-    // Check that both CONTINUITY_AUDIT and FINAL_REVIEW were processed
++    // Check that the full release pipeline was processed
+     const { enqueue } = await import('@auto-graph/core');
+     const allEnqueued = vi.mocked(enqueue).mock.calls.map(([, item]) => item);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'CONTINUITY_AUDIT')).toBe(true);
+     expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'FINAL_REVIEW')).toBe(true);
++    expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'PACKAGE_MANUSCRIPT')).toBe(true);
++    expect(allEnqueued.some((item: unknown) => (item as { type: string }).type === 'GENERATE_LISTING')).toBe(true);
+ 
+     // Verify DynamoDB state: project created
+     const project = store.projects.get(PROJECT_ID);
+     expect(project).toBeDefined();
+-    expect(project!.status).toBe('COMPLETE');
++    expect(project!.status).toBe('RELEASED');
+ 
+     // Task graph should have chapter 1 with MERGED status
+     const latestVersion = store.taskGraphLatestVersion.get(PROJECT_ID);
+@@ -165,7 +177,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+ 
+     const node = taskGraph!.nodes[0]!;
+     expect(node.status).toBe('MERGED');
+-    expect(node.wordCount).toBe(300);
++    expect(node.wordCount).toBe(4000);
+   });
+ 
+   it('records the correct pipeline step sequence', async () => {
+@@ -173,7 +185,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       type: 'BOOTSTRAP_PROJECT',
+       projectId: PROJECT_ID,
+       issueNumber: 42,
+-      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 300\nchapterCount: 1',
++      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 4000\nchapterCount: 1',
+     });
+ 
+     await runAll();
+@@ -202,6 +214,10 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       'CONTINUITY_FIX',
+       'RECONCILE', // fixer
+       'FINAL_REVIEW',
++      'PACKAGE_MANUSCRIPT',
++      'RECONCILE', // packager
++      'GENERATE_LISTING',
++      'RECONCILE', // marketer
+     ];
+ 
+     expect(types).toEqual(expectedSequence);
+@@ -212,7 +228,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       type: 'BOOTSTRAP_PROJECT',
+       projectId: PROJECT_ID,
+       issueNumber: 42,
+-      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 300\nchapterCount: 1',
++      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 4000\nchapterCount: 1',
+     });
+ 
+     await runAll();
+@@ -226,7 +242,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       type: 'BOOTSTRAP_PROJECT',
+       projectId: PROJECT_ID,
+       issueNumber: 42,
+-      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 300\nchapterCount: 1',
++      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 4000\nchapterCount: 1',
+     });
+ 
+     await runAll();
+@@ -241,7 +257,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       type: 'BOOTSTRAP_PROJECT',
+       projectId: PROJECT_ID,
+       issueNumber: 42,
+-      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 300\nchapterCount: 1',
++      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 4000\nchapterCount: 1',
+     });
+ 
+     await runAll();
+@@ -257,7 +273,7 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       type: 'BOOTSTRAP_PROJECT',
+       projectId: PROJECT_ID,
+       issueNumber: 42,
+-      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 300\nchapterCount: 1',
++      issueBody: 'title: The Test Novel\ngenre: Fantasy\nprojectType: NOVEL\ntargetWordCount: 4000\nchapterCount: 1',
+     });
+ 
+     await runAll();
+diff --git a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+index dcd9217..857d85c 100644
+--- a/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
++++ b/packages/lambdas/src/__tests__/integration/revision-loop.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts b/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
+index 3c116c2..46273e5 100644
+--- a/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
++++ b/packages/lambdas/src/__tests__/integration/stalled-runs.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+diff --git a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+index f6c9882..474ea9c 100644
+--- a/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
++++ b/packages/lambdas/src/__tests__/integration/word-count-gate.test.ts
+@@ -33,8 +33,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue(
+@@ -81,7 +81,7 @@ beforeEach(() => {
+ 
+ describe('Word count gate', () => {
+   it('re-enqueues TRIGGER_CHAPTER when word count is below minimum', async () => {
+-    // Set short chapter content (100 words, below reconcile's 270-word minimum)
++    // Set short chapter content (1000 words, below reconcile's 3800-word minimum)
+     fileContents.set('manuscript/chapter-01.md', MOCK_SHORT_CHAPTER_CONTENT);
+ 
+     // Trigger chapter: acquires lock, launches writer ECS, enqueues RECONCILE
+@@ -124,7 +124,7 @@ describe('Word count gate', () => {
+   });
+ 
+   it('proceeds to REVIEW_CHAPTER when word count is valid', async () => {
+-    // Use valid chapter content (300 words)
++    // Use valid chapter content (4000 words)
+     fileContents.set('manuscript/chapter-01.md', MOCK_CHAPTER_CONTENT);
+ 
+     await dispatch({
+@@ -162,8 +162,8 @@ describe('Word count gate', () => {
+ 
+   it('merge-chapter rejects under-count chapters with blocking comment', async () => {
+     // For this test: simulate a MERGE_CHAPTER attempt with under-count content.
+-    // merge-chapter uses 20% tolerance: min=240, max=360 for target=300.
+-    // 100-word content still fails the 20% check (100 < 240).
++    // merge-chapter uses 20% tolerance: min=3200, clamped to [3000,5000]
++    // 1000-word content fails the merge check (1000 < 3000).
+     fileContents.set('manuscript/chapter-01.md', MOCK_SHORT_CHAPTER_CONTENT);
+ 
+     // Seed node with PR number (as if writer and editor steps already ran)
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
+index 83a9d70..dd50743 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-audit.test.ts
+@@ -15,8 +15,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/auditor-abc'),
+@@ -32,7 +32,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../continuity-audit.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+index 345fb1c..1920b19 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-check.test.ts
+@@ -16,8 +16,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/continuity-abc'),
+@@ -34,7 +34,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../continuity-check.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts b/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
+index d44cd30..6d21988 100644
+--- a/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/continuity-fixer.test.ts
+@@ -15,8 +15,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/fixer-abc'),
+@@ -32,7 +32,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../continuity-fixer.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/final-review.test.ts b/packages/lambdas/src/handlers/__tests__/final-review.test.ts
+index 390555f..5dcd296 100644
+--- a/packages/lambdas/src/handlers/__tests__/final-review.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/final-review.test.ts
+@@ -9,6 +9,7 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+     ProjectService: vi.fn(),
+     TaskGraphService: vi.fn(),
+     createGitHubClient: vi.fn(),
++    enqueue: vi.fn().mockResolvedValue(undefined),
+   };
+ });
+ 
+@@ -72,7 +73,8 @@ const allMergedGraph = {
+ 
+ let mockProjectServiceMethods: {
+   get: ReturnType<typeof vi.fn>;
+-  setComplete: ReturnType<typeof vi.fn>;
++  updateWordCount: ReturnType<typeof vi.fn>;
++  updateStatus: ReturnType<typeof vi.fn>;
+ };
+ let mockTaskGraphServiceMethods: {
+   getLatest: ReturnType<typeof vi.fn>;
+@@ -114,7 +116,8 @@ beforeEach(() => {
+ 
+   mockProjectServiceMethods = {
+     get: vi.fn().mockResolvedValue(validProject),
+-    setComplete: vi.fn().mockResolvedValue(undefined),
++    updateWordCount: vi.fn().mockResolvedValue(undefined),
++    updateStatus: vi.fn().mockResolvedValue(undefined),
+   };
+   vi.mocked(ProjectService).mockImplementation(() => mockProjectServiceMethods as never);
+ 
+@@ -131,17 +134,26 @@ beforeEach(() => {
+ });
+ 
+ describe('final-review handler', () => {
+-  it('marks project COMPLETE with word counts from task graph nodes', async () => {
++  it('sets project status to PACKAGING and enqueues PACKAGE_MANUSCRIPT', async () => {
++    const { enqueue } = await import('@auto-graph/core');
+     await handler(makeEvent('proj-123'), {} as never, () => {});
+ 
+-    expect(mockProjectServiceMethods.setComplete).toHaveBeenCalledWith(
++    expect(mockProjectServiceMethods.updateWordCount).toHaveBeenCalledWith(
+       'proj-123',
+       90000, // 30000 + 28000 + 32000
+-      3,
++    );
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith(
++      'proj-123',
++      'PACKAGING',
++    );
++    expect(vi.mocked(enqueue)).toHaveBeenCalledWith(
++      baseEnv.SQS_QUEUE_URL,
++      { type: 'PACKAGE_MANUSCRIPT', projectId: 'proj-123' },
+     );
+   });
+ 
+   it('falls back to reading chapter files when wordCount is missing', async () => {
++    const { enqueue } = await import('@auto-graph/core');
+     const graphWithoutWordCounts = {
+       ...allMergedGraph,
+       nodes: allMergedGraph.nodes.map((n) => ({ ...n, wordCount: undefined })),
+@@ -160,10 +172,13 @@ describe('final-review handler', () => {
+     await handler(makeEvent('proj-123'), {} as never, () => {});
+ 
+     expect(mockGitHubClientMethods.getFileContent).toHaveBeenCalledTimes(3);
+-    expect(mockProjectServiceMethods.setComplete).toHaveBeenCalledWith(
++    expect(mockProjectServiceMethods.updateWordCount).toHaveBeenCalledWith(
+       'proj-123',
+       450, // 100 + 200 + 150
+-      3,
++    );
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith(
++      'proj-123',
++      'PACKAGING',
+     );
+   });
+ 
+diff --git a/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts b/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
+index 00bce21..561f74d 100644
+--- a/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/generate-outline.test.ts
+@@ -14,8 +14,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123'),
+@@ -30,7 +30,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../generate-outline.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
+index f9c9e20..d124e25 100644
+--- a/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/merge-chapter.test.ts
+@@ -37,13 +37,14 @@ const baseEnv = {
+   LOG_LEVEL: 'info',
+ };
+ 
+-// 30 000-word target with 20 % tolerance => min 24 000, max 36 000
++// 5000-word chapter (90k target / 3 chapters = 30k, clamped to [3k, 5k]) with 20% tolerance
++// => unclamped range [24k, 36k], clamped to [5k, 5k] per project type
+ // We'll use a content with a known word count.
+ function makeContent(wordCount: number): string {
+   return Array(wordCount).fill('word').join(' ');
+ }
+ 
+-const CHAPTER_WORD_COUNT = 30000; // exactly on target
++const CHAPTER_WORD_COUNT = 5000; // within clamped range [3000, 5000]
+ const chapterContent = makeContent(CHAPTER_WORD_COUNT);
+ 
+ const validProject = {
+diff --git a/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts b/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
+index c3870b8..f7af761 100644
+--- a/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/plan-chapters.test.ts
+@@ -14,8 +14,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/abc123'),
+@@ -30,7 +30,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../plan-chapters.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+index 0326a0d..2917f3f 100644
+--- a/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/reconcile.test.ts
+@@ -671,9 +671,9 @@ describe('RECONCILE — writer success (valid word count)', () => {
+ 
+     expect(vi.mocked(validateWordCount)).toHaveBeenCalledOnce();
+     const [, target] = vi.mocked(validateWordCount).mock.calls[0]!;
+-    // targetWordCount=90000, chapterCount=3 → 30000 per chapter, ±10%
+-    expect(target.min).toBe(27000);
+-    expect(target.max).toBe(33000);
++    // targetWordCount=90000, chapterCount=3 → 30000 per chapter, ±5% (writer stage)
++    expect(target.min).toBe(28500);
++    expect(target.max).toBe(31500);
+   });
+ 
+   it('enqueues REVIEW_CHAPTER when word count is valid', async () => {
+diff --git a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+index d2fdf18..881d117 100644
+--- a/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/review-chapter.test.ts
+@@ -16,8 +16,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/editor-abc'),
+@@ -34,7 +34,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../review-chapter.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
+index c168b2c..fae519f 100644
+--- a/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/revise-chapter.test.ts
+@@ -17,8 +17,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/reviser-abc'),
+@@ -36,7 +36,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../revise-chapter.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+index 0b044fb..205605d 100644
+--- a/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/trigger-chapter.test.ts
+@@ -17,8 +17,8 @@ vi.mock('@auto-graph/core', async (importOriginal) => {
+   };
+ });
+ 
+-vi.mock('../../shared/index.js', async (importOriginal) => {
+-  const actual = await importOriginal<typeof import('../../shared/index.js')>();
++vi.mock('../../shared/ecs-launcher.js', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('../../shared/ecs-launcher.js')>();
+   return {
+     ...actual,
+     launchECSTask: vi.fn().mockResolvedValue('arn:aws:ecs:us-east-1:123:task/test/writer-abc'),
+@@ -36,7 +36,7 @@ import {
+   enqueue,
+   ProjectType,
+ } from '@auto-graph/core';
+-import { launchECSTask } from '../../shared/index.js';
++import { launchECSTask } from '../../shared/ecs-launcher.js';
+ import { handler } from '../trigger-chapter.js';
+ 
+ const baseEnv = {
+diff --git a/packages/lambdas/src/handlers/continuity-audit.ts b/packages/lambdas/src/handlers/continuity-audit.ts
+index 419240e..f5c46da 100644
+--- a/packages/lambdas/src/handlers/continuity-audit.ts
++++ b/packages/lambdas/src/handlers/continuity-audit.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,7 +8,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -51,41 +50,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: auditorTaskDefArn,
++    workerType: 'auditor',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: auditorTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'auditor',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/continuity-check.ts b/packages/lambdas/src/handlers/continuity-check.ts
+index d3db2a5..72598c1 100644
+--- a/packages/lambdas/src/handlers/continuity-check.ts
++++ b/packages/lambdas/src/handlers/continuity-check.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -10,7 +9,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -78,43 +77,19 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: continuityCheckerTaskDefArn,
++    workerType: 'continuity-checker',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: continuityCheckerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'continuity-checker',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/continuity-fixer.ts b/packages/lambdas/src/handlers/continuity-fixer.ts
+index a9e6fab..d034eef 100644
+--- a/packages/lambdas/src/handlers/continuity-fixer.ts
++++ b/packages/lambdas/src/handlers/continuity-fixer.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,7 +8,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -51,41 +50,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     seriesBookNumber: project.config.series?.bookNumber,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: fixerTaskDefArn,
++    workerType: 'fixer',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: fixerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'fixer',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await enqueue(config.SQS_QUEUE_URL, {
+diff --git a/packages/lambdas/src/handlers/create-issues.ts b/packages/lambdas/src/handlers/create-issues.ts
+index 5f5668e..a87e321 100644
+--- a/packages/lambdas/src/handlers/create-issues.ts
++++ b/packages/lambdas/src/handlers/create-issues.ts
+@@ -4,6 +4,7 @@ import {
+   TaskGraphService,
+   createGitHubClient,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+ import { withSQSHandler } from '../shared/index.js';
+@@ -35,9 +36,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   const github = createGitHubClient(config.GITHUB_TOKEN, logger);
+   const repo = { owner: config.GITHUB_ORG, repo: project.repoName };
+ 
+-  const wordCountPerChapter = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountPerChapter = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   // Idempotency: skip if issues were already created for this task graph
+   const alreadyCreated = taskGraph.nodes.every((n) => n.issueNumber !== undefined);
+diff --git a/packages/lambdas/src/handlers/dispatcher.ts b/packages/lambdas/src/handlers/dispatcher.ts
+index 93bbec0..f1da413 100644
+--- a/packages/lambdas/src/handlers/dispatcher.ts
++++ b/packages/lambdas/src/handlers/dispatcher.ts
+@@ -17,6 +17,8 @@ import { handle as handleContinuityCheck } from './continuity-check.js';
+ import { handle as handleContinuityAudit } from './continuity-audit.js';
+ import { handle as handleContinuityFix } from './continuity-fixer.js';
+ import { handle as handleFinalReview } from './final-review.js';
++import { handle as handlePackageManuscript } from './package-manuscript.js';
++import { handle as handleGenerateListing } from './generate-listing.js';
+ 
+ type HandlerFn = (workItem: WorkItem, context: HandlerContext) => Promise<void>;
+ 
+@@ -36,6 +38,8 @@ const handlers: Record<string, HandlerFn> = {
+   CONTINUITY_AUDIT: handleContinuityAudit,
+   CONTINUITY_FIX: handleContinuityFix,
+   FINAL_REVIEW: handleFinalReview,
++  PACKAGE_MANUSCRIPT: handlePackageManuscript,
++  GENERATE_LISTING: handleGenerateListing,
+ };
+ 
+ const sqsHandler = withSQSHandler(async (workItem, context) => {
+diff --git a/packages/lambdas/src/handlers/final-review.ts b/packages/lambdas/src/handlers/final-review.ts
+index 276a80e..2837918 100644
+--- a/packages/lambdas/src/handlers/final-review.ts
++++ b/packages/lambdas/src/handlers/final-review.ts
+@@ -5,6 +5,7 @@ import {
+   createGitHubClient,
+   validateWordCount,
+   buildBookWorkflow,
++  enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+ import { withSQSHandler } from '../shared/index.js';
+@@ -64,9 +65,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   const chapterCount = taskGraph.nodes.length;
+ 
+-  await projectService.setComplete(projectId, totalWordCount, chapterCount);
++  // Store word counts and chapter count for later reference
++  await projectService.updateWordCount(projectId, totalWordCount);
+ 
+-  // Enable the build-book workflow push trigger now that the book is complete
++  // Enable the build-book workflow push trigger
+   const workflowContent = buildBookWorkflow(project.repoName, true);
+   await github.createOrUpdateFile(
+     repo,
+@@ -75,7 +77,14 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     'ci: enable build-book workflow push trigger',
+   );
+ 
+-  logger.info('Final review complete, project marked COMPLETE', {
++  // Transition to PACKAGING and enqueue the packager
++  await projectService.updateStatus(projectId, 'PACKAGING');
++  await enqueue(config.SQS_QUEUE_URL, {
++    type: 'PACKAGE_MANUSCRIPT',
++    projectId,
++  });
++
++  logger.info('Final review complete, enqueued PACKAGE_MANUSCRIPT', {
+     projectId,
+     totalWordCount,
+     chapterCount,
+diff --git a/packages/lambdas/src/handlers/generate-listing.ts b/packages/lambdas/src/handlers/generate-listing.ts
+new file mode 100644
+index 0000000..74915a8
+--- /dev/null
++++ b/packages/lambdas/src/handlers/generate-listing.ts
+@@ -0,0 +1,66 @@
++import {
++  createDynamoClient,
++  ProjectService,
++  AgentRunService,
++  TaskOutputService,
++  buildMarketerPrompt,
++  enqueue,
++} from '@auto-graph/core';
++import type { WorkItem } from '@auto-graph/core';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
++import type { HandlerContext } from '../shared/index.js';
++
++export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
++  const { logger, config } = context;
++
++  if (workItem.type !== 'GENERATE_LISTING') {
++    throw new Error(`Unexpected work item type: ${workItem.type}`);
++  }
++
++  const { projectId } = workItem;
++
++  const marketerTaskDefArn = process.env['MARKETER_TASK_DEF_ARN'];
++  if (!marketerTaskDefArn) {
++    throw new Error('MARKETER_TASK_DEF_ARN environment variable is not set');
++  }
++
++  const dynamoClient = createDynamoClient(config.AWS_REGION);
++  const projectService = new ProjectService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const agentRunService = new AgentRunService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const taskOutputService = new TaskOutputService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++
++  const project = await projectService.get(projectId);
++  if (!project) {
++    throw new Error(`Project not found: ${projectId}`);
++  }
++
++  const systemPrompt = buildMarketerPrompt({
++    title: project.config.title,
++    repoName: project.repoName,
++    genre: project.config.genre ?? 'Fiction',
++    projectType: project.config.projectType,
++  });
++
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: marketerTaskDefArn,
++    workerType: 'marketer',
++    systemPrompt,
++    projectId,
++    repoName: project.repoName,
++    config,
++    agentRunService,
++    taskOutputService,
++  });
++
++  await projectService.updateStatus(projectId, 'RELEASING');
++
++  await enqueue(config.SQS_QUEUE_URL, {
++    type: 'RECONCILE',
++    projectId,
++    runId,
++  });
++
++  logger.info('Generate listing launched', { projectId, runId, taskArn });
++}
++
++export const handler = withSQSHandler(handle);
+diff --git a/packages/lambdas/src/handlers/generate-outline.ts b/packages/lambdas/src/handlers/generate-outline.ts
+index 0e09b62..ffdc50b 100644
+--- a/packages/lambdas/src/handlers/generate-outline.ts
++++ b/packages/lambdas/src/handlers/generate-outline.ts
+@@ -1,4 +1,3 @@
+-import { randomUUID } from 'node:crypto';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,7 +7,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -46,41 +45,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     series: project.config.series,
+   });
+ 
+-  const runId = randomUUID();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: outlinerTaskDefArn,
++    workerType: 'outliner',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: outlinerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'outliner',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await projectService.updateStatus(projectId, 'OUTLINING');
+diff --git a/packages/lambdas/src/handlers/merge-chapter.ts b/packages/lambdas/src/handlers/merge-chapter.ts
+index 5159b6f..7499c3a 100644
+--- a/packages/lambdas/src/handlers/merge-chapter.ts
++++ b/packages/lambdas/src/handlers/merge-chapter.ts
+@@ -7,13 +7,13 @@ import {
+   evaluateMergeReadiness,
+   validateWordCount,
+   enqueue,
++  resolveWordCountRange,
++  clampToProjectType,
+ } from '@auto-graph/core';
+ import type { PRReview, PRComment, WorkItem } from '@auto-graph/core';
+ import { withSQSHandler } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+-const WORD_COUNT_TOLERANCE = 0.2;
+-
+ function determineEditorialVerdict(
+   reviews: PRReview[],
+   prComments?: PRComment[],
+@@ -103,21 +103,23 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   const chapterContent = Buffer.from(chapterFile.content, 'base64').toString('utf-8');
+ 
+-  const perChapterTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
+-  const wordCountTarget = {
+-    min: Math.floor(perChapterTarget * (1 - WORD_COUNT_TOLERANCE)),
+-    max: Math.floor(perChapterTarget * (1 + WORD_COUNT_TOLERANCE)),
+-  };
++  const wordCountRange = resolveWordCountRange({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++    stage: 'merge',
++  });
++  const clampedWordCountRange = clampToProjectType({
++    range: wordCountRange,
++    projectType: project.config.projectType,
++  });
+ 
+-  const { wordCount } = validateWordCount(chapterContent, wordCountTarget);
++  const { wordCount } = validateWordCount(chapterContent, clampedWordCountRange);
+ 
+   const editorialVerdict = determineEditorialVerdict(reviews, prComments);
+ 
+   const readiness = evaluateMergeReadiness({
+     chapterContent,
+-    wordCountTarget,
++    wordCountTarget: clampedWordCountRange,
+     editorialVerdict,
+     continuityStatus: 'PENDING',
+   });
+diff --git a/packages/lambdas/src/handlers/package-manuscript.ts b/packages/lambdas/src/handlers/package-manuscript.ts
+new file mode 100644
+index 0000000..75ce762
+--- /dev/null
++++ b/packages/lambdas/src/handlers/package-manuscript.ts
+@@ -0,0 +1,66 @@
++import {
++  createDynamoClient,
++  ProjectService,
++  AgentRunService,
++  TaskOutputService,
++  buildPackagerPrompt,
++  enqueue,
++} from '@auto-graph/core';
++import type { WorkItem } from '@auto-graph/core';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
++import type { HandlerContext } from '../shared/index.js';
++
++export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
++  const { logger, config } = context;
++
++  if (workItem.type !== 'PACKAGE_MANUSCRIPT') {
++    throw new Error(`Unexpected work item type: ${workItem.type}`);
++  }
++
++  const { projectId } = workItem;
++
++  const packagerTaskDefArn = process.env['PACKAGER_TASK_DEF_ARN'];
++  if (!packagerTaskDefArn) {
++    throw new Error('PACKAGER_TASK_DEF_ARN environment variable is not set');
++  }
++
++  const dynamoClient = createDynamoClient(config.AWS_REGION);
++  const projectService = new ProjectService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const agentRunService = new AgentRunService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++  const taskOutputService = new TaskOutputService(dynamoClient, config.DYNAMODB_TABLE_PREFIX);
++
++  const project = await projectService.get(projectId);
++  if (!project) {
++    throw new Error(`Project not found: ${projectId}`);
++  }
++
++  const systemPrompt = buildPackagerPrompt({
++    title: project.config.title,
++    repoName: project.repoName,
++    chapterCount: project.config.chapterCount,
++    projectType: project.config.projectType,
++  });
++
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: packagerTaskDefArn,
++    workerType: 'packager',
++    systemPrompt,
++    projectId,
++    repoName: project.repoName,
++    config,
++    agentRunService,
++    taskOutputService,
++  });
++
++  await projectService.updateStatus(projectId, 'PACKAGING');
++
++  await enqueue(config.SQS_QUEUE_URL, {
++    type: 'RECONCILE',
++    projectId,
++    runId,
++  });
++
++  logger.info('Package manuscript launched', { projectId, runId, taskArn });
++}
++
++export const handler = withSQSHandler(handle);
+diff --git a/packages/lambdas/src/handlers/plan-chapters.ts b/packages/lambdas/src/handlers/plan-chapters.ts
+index 3b6f5e8..e15dea7 100644
+--- a/packages/lambdas/src/handlers/plan-chapters.ts
++++ b/packages/lambdas/src/handlers/plan-chapters.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,7 +7,7 @@ import {
+   enqueue,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -40,41 +39,15 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     projectType: project.config.projectType,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: plannerTaskDefArn,
++    workerType: 'planner',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: plannerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+-    },
++    repoName: project.repoName,
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'planner',
+-    status: 'RUNNING',
+-    startedAt: now,
++    agentRunService,
++    taskOutputService,
+   });
+ 
+   await projectService.updateStatus(projectId, 'PLANNING');
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index 8e2e77f..5b2b90e 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -13,6 +13,9 @@ import {
+   createGitHubClient,
+   enqueue,
+   validateWordCount,
++  validateListing,
++  resolveWordCountRange,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
+ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+@@ -164,6 +167,22 @@ async function reEnqueueForRetry(
+       );
+       return true;
+     }
++    case 'packager': {
++      await enqueueReaction(
++        queueUrlPrefix,
++        { type: 'PACKAGE_MANUSCRIPT', projectId },
++        sourceRunId,
++      );
++      return true;
++    }
++    case 'marketer': {
++      await enqueueReaction(
++        queueUrlPrefix,
++        { type: 'GENERATE_LISTING', projectId },
++        sourceRunId,
++      );
++      return true;
++    }
+     default:
+       return false;
+   }
+@@ -749,14 +768,16 @@ async function runReconcile(
+       );
+       const chapterText = Buffer.from(chapterFile.content, 'base64').toString('utf-8');
+ 
+-      const wordCountTarget = Math.floor(
+-        project.config.targetWordCount / project.config.chapterCount,
+-      );
+-      const tolerance = 0.1;
+-      const { valid, wordCount } = validateWordCount(chapterText, {
+-        min: Math.floor(wordCountTarget * (1 - tolerance)),
+-        max: Math.ceil(wordCountTarget * (1 + tolerance)),
++      const wordCountRange = resolveWordCountRange({
++        targetWordCount: project.config.targetWordCount,
++        chapterCount: project.config.chapterCount,
++        stage: 'writer',
++      });
++      const wordCountTarget = resolveChapterTarget({
++        targetWordCount: project.config.targetWordCount,
++        chapterCount: project.config.chapterCount,
+       });
++      const { valid, wordCount } = validateWordCount(chapterText, wordCountRange);
+ 
+       const MAX_WORD_COUNT_RETRIES = 3;
+ 
+@@ -1021,6 +1042,62 @@ async function runReconcile(
+       });
+       break;
+     }
++
++    case 'packager': {
++      // Packager completed the manuscript assembly and manifest generation.
++      // Transition to RELEASING and enqueue the listing generator.
++      await projectService.updateStatus(projectId, 'RELEASING');
++
++      await enqueueReaction(
++        config.SQS_QUEUE_URL,
++        { type: 'GENERATE_LISTING', projectId },
++        runId,
++      );
++
++      logger.info('Packager succeeded, project status set to RELEASING, enqueued GENERATE_LISTING', {
++        projectId,
++        runId,
++      });
++      break;
++    }
++
++    case 'marketer': {
++      // Marketer completed the store listing. Validate it.
++      try {
++        const listingFile = await github.getFileContent(
++          repo,
++          'release/listing.json',
++          'main',
++        );
++        const listingContent = Buffer.from(listingFile.content, 'base64').toString('utf-8');
++        const listing = JSON.parse(listingContent);
++
++        const validation = validateListing(listing);
++        if (validation.valid) {
++          await projectService.updateStatus(projectId, 'RELEASED');
++          logger.info('Marketer succeeded, listing valid, project status set to RELEASED', {
++            projectId,
++            runId,
++          });
++        } else {
++          await projectService.updateStatus(projectId, 'FAILED');
++          logger.error('Marketer succeeded but listing validation failed', {
++            projectId,
++            runId,
++            errorCodes: validation.errors.map((e) => e.code),
++            errors: validation.errors,
++          });
++        }
++      } catch (err) {
++        await projectService.updateStatus(projectId, 'FAILED');
++        logger.error('Marketer succeeded but failed to read/parse/validate listing', {
++          projectId,
++          runId,
++          error: err instanceof Error ? err.message : String(err),
++        });
++      }
++      break;
++    }
+   }
+ 
+   logger.info('Reconcile complete', {
+diff --git a/packages/lambdas/src/handlers/review-chapter.ts b/packages/lambdas/src/handlers/review-chapter.ts
+index 8adb20f..6fc6553 100644
+--- a/packages/lambdas/src/handlers/review-chapter.ts
++++ b/packages/lambdas/src/handlers/review-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -8,9 +7,10 @@ import {
+   createGitHubClient,
+   buildEditorPrompt,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -72,9 +72,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     }
+   }
+ 
+-  const wordCountTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountTarget = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   const systemPrompt = buildEditorPrompt({
+     chapterNumber: node.chapterNumber,
+@@ -87,45 +88,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     revisionRound: node.revisionRound,
+   });
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: editorTaskDefArn,
++    workerType: 'editor',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: editorTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+       BRANCH_NAME: branchName,
+       PR_NUMBER: String(prNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'editor',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(projectId, taskGraph.version, nodeId, 'REVIEWING', runId);
+diff --git a/packages/lambdas/src/handlers/revise-chapter.ts b/packages/lambdas/src/handlers/revise-chapter.ts
+index 3dd525a..f5b528d 100644
+--- a/packages/lambdas/src/handlers/revise-chapter.ts
++++ b/packages/lambdas/src/handlers/revise-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,9 +8,10 @@ import {
+   createGitHubClient,
+   buildReviserPrompt,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ export async function handle(workItem: WorkItem, context: HandlerContext): Promise<void> {
+@@ -77,9 +77,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+   const paddedChapter = String(node.chapterNumber).padStart(2, '0');
+   const branchName = `chapter-${paddedChapter}`;
+ 
+-  const wordCountTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountTarget = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   const systemPrompt = buildReviserPrompt({
+     reviewComments,
+@@ -107,45 +108,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     return;
+   }
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: reviserTaskDefArn,
++    workerType: 'reviser',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: reviserTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(node.chapterNumber),
+       BRANCH_NAME: branchName,
+       PR_NUMBER: String(prNumber),
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'reviser',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(
+diff --git a/packages/lambdas/src/handlers/trigger-chapter.ts b/packages/lambdas/src/handlers/trigger-chapter.ts
+index cc7047c..74927df 100644
+--- a/packages/lambdas/src/handlers/trigger-chapter.ts
++++ b/packages/lambdas/src/handlers/trigger-chapter.ts
+@@ -1,4 +1,3 @@
+-import { ulid } from 'ulid';
+ import {
+   createDynamoClient,
+   ProjectService,
+@@ -9,9 +8,10 @@ import {
+   createGitHubClient,
+   buildWriterPrompt,
+   enqueue,
++  resolveChapterTarget,
+ } from '@auto-graph/core';
+ import type { ContinuityState, WorkItem } from '@auto-graph/core';
+-import { withSQSHandler, launchECSTask } from '../shared/index.js';
++import { withSQSHandler, launchAgentRun } from '../shared/index.js';
+ import type { HandlerContext } from '../shared/index.js';
+ 
+ const EMPTY_CONTINUITY_STATE: ContinuityState = {
+@@ -82,9 +82,10 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     }
+   }
+ 
+-  const wordCountTarget = Math.floor(
+-    project.config.targetWordCount / project.config.chapterCount,
+-  );
++  const wordCountTarget = resolveChapterTarget({
++    targetWordCount: project.config.targetWordCount,
++    chapterCount: project.config.chapterCount,
++  });
+ 
+   const systemPrompt = buildWriterPrompt({
+     chapterNumber,
+@@ -116,45 +117,21 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   const paddedChapter = String(chapterNumber).padStart(2, '0');
+ 
+-  const runId = ulid();
+-  const now = new Date().toISOString();
+-
+-  await taskOutputService.save({
+-    runId,
+-    outputType: 'system-prompt',
++  const { runId, taskArn } = await launchAgentRun({
++    taskDefArn: writerTaskDefArn,
++    workerType: 'writer',
++    systemPrompt,
+     projectId,
+-    content: systemPrompt,
+-    contentLength: systemPrompt.length,
+-    createdAt: now,
+-  });
+-
+-  const taskArn = await launchECSTask({
+-    taskDefinition: writerTaskDefArn,
+-    command: ['claude', '-p', '$SYSTEM_PROMPT'],
+-    environment: {
+-      PROJECT_ID: projectId,
+-      REPO_NAME: project.repoName,
++    repoName: project.repoName,
++    extraEnv: {
+       CHAPTER_NUMBER: String(chapterNumber),
+       BRANCH_NAME: `chapter-${paddedChapter}`,
+       ISSUE_NUMBER: node.issueNumber !== undefined ? String(node.issueNumber) : '',
+-      RUN_ID: runId,
+-      AWS_REGION: config.AWS_REGION,
+-      DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
+     },
+     config,
+-    stateMachineArn: process.env['STATE_MACHINE_ARN'],
+-    runId,
+-    projectId,
+-  });
+-
+-  await agentRunService.create({
+-    runId,
+-    projectId,
+-    taskArn,
+-    workerType: 'writer',
++    agentRunService,
++    taskOutputService,
+     nodeId,
+-    status: 'RUNNING',
+-    startedAt: now,
+   });
+ 
+   await taskGraphService.updateNodeStatus(projectId, taskGraph.version, nodeId, 'WRITING', runId);
+diff --git a/packages/lambdas/src/shared/index.ts b/packages/lambdas/src/shared/index.ts
+index b800a0b..97b758b 100644
+--- a/packages/lambdas/src/shared/index.ts
++++ b/packages/lambdas/src/shared/index.ts
+@@ -2,6 +2,8 @@ export type { HandlerContext } from './types.js';
+ export { withSQSHandler } from './middleware.js';
+ export { launchECSTask, getECSTaskStatus } from './ecs-launcher.js';
+ export type { LaunchECSTaskParams, ECSTaskStatus } from './ecs-launcher.js';
++export { launchAgentRun } from './launch-agent-run.js';
++export type { LaunchAgentRunParams } from './launch-agent-run.js';
+ export { withErrorHandling } from './error-handler.js';
+ export type { ErrorHandlerOptions } from './error-handler.js';
+ export { success, accepted, badRequest, serverError } from './responses.js';
+diff --git a/packages/lambdas/src/shared/launch-agent-run.ts b/packages/lambdas/src/shared/launch-agent-run.ts
+new file mode 100644
+index 0000000..a5379d2
+--- /dev/null
++++ b/packages/lambdas/src/shared/launch-agent-run.ts
+@@ -0,0 +1,65 @@
++import { ulid } from 'ulid';
++import type { WorkerType, AgentRunService, TaskOutputService, EnvironmentConfig } from '@auto-graph/core';
++import { launchECSTask } from './ecs-launcher.js';
++
++export interface LaunchAgentRunParams {
++  taskDefArn: string;
++  workerType: WorkerType;
++  systemPrompt: string;
++  projectId: string;
++  repoName: string;
++  extraEnv?: Record<string, string> | undefined;
++  config: EnvironmentConfig;
++  agentRunService: AgentRunService;
++  taskOutputService: TaskOutputService;
++  nodeId?: string | undefined;
++}
++
++export async function launchAgentRun(params: LaunchAgentRunParams): Promise<{ runId: string; taskArn: string }> {
++  const { taskDefArn, workerType, systemPrompt, projectId, repoName, extraEnv, config, agentRunService, taskOutputService, nodeId } = params;
++
++  const runId = ulid();
++  const now = new Date().toISOString();
++
++  await taskOutputService.save({
++    runId,
++    outputType: 'system-prompt',
++    projectId,
++    content: systemPrompt,
++    contentLength: systemPrompt.length,
++    createdAt: now,
++  });
++
++  const environment = {
++    PROJECT_ID: projectId,
++    REPO_NAME: repoName,
++    RUN_ID: runId,
++    AWS_REGION: config.AWS_REGION,
++    DYNAMODB_TABLE_PREFIX: config.DYNAMODB_TABLE_PREFIX,
++    ...extraEnv,
++  };
++
++  const taskArn = await launchECSTask({
++    taskDefinition: taskDefArn,
++    command: ['claude', '-p', '$SYSTEM_PROMPT'],
++    environment,
++    config,
++    stateMachineArn: process.env['STATE_MACHINE_ARN'],
++    runId,
++    projectId,
++  });
++
++  const agentRunItem = {
++    runId,
++    projectId,
++    taskArn,
++    workerType,
++    status: 'RUNNING' as const,
++    startedAt: now,
++    ...(nodeId !== undefined && { nodeId }),
++  };
++
++  await agentRunService.create(agentRunItem);
++
++  return { runId, taskArn };
++}
+diff --git a/packages/worker/src/entrypoint.ts b/packages/worker/src/entrypoint.ts
+index efc4e10..aa30ecc 100644
+--- a/packages/worker/src/entrypoint.ts
++++ b/packages/worker/src/entrypoint.ts
+@@ -77,6 +77,8 @@ export async function loadWorker(workerType: string): Promise<WorkerModule> {
+       import('./workers/continuity-checker.js') as Promise<WorkerModule>,
+     auditor: () => import('./workers/auditor.js') as Promise<WorkerModule>,
+     fixer: () => import('./workers/continuity-fixer.js') as Promise<WorkerModule>,
++    packager: () => import('./workers/packager.js') as Promise<WorkerModule>,
++    marketer: () => import('./workers/marketer.js') as Promise<WorkerModule>,
+   };
+ 
+   const loader = loaders[workerType];
+diff --git a/packages/worker/src/workers/marketer.ts b/packages/worker/src/workers/marketer.ts
+new file mode 100644
+index 0000000..27c17ad
+--- /dev/null
++++ b/packages/worker/src/workers/marketer.ts
+@@ -0,0 +1,9 @@
++import type { WorkerEnv } from '../types.js';
++
++export async function prepare(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // Marketer works on main branch; no branch setup required
++}
++
++export async function finalize(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // The marketer commits and pushes the listing directly — no post-processing needed
++}
+diff --git a/packages/worker/src/workers/packager.ts b/packages/worker/src/workers/packager.ts
+new file mode 100644
+index 0000000..a87396c
+--- /dev/null
++++ b/packages/worker/src/workers/packager.ts
+@@ -0,0 +1,9 @@
++import type { WorkerEnv } from '../types.js';
++
++export async function prepare(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // Packager works on main branch; no branch setup required
++}
++
++export async function finalize(_repoDir: string, _env: WorkerEnv): Promise<void> {
++  // The packager commits and pushes its manifest directly — no post-processing needed
++}

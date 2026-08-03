@@ -1,0 +1,334 @@
+diff --git a/README.md b/README.md
+index e3bd98f..a645c84 100644
+--- a/README.md
++++ b/README.md
+@@ -16,7 +16,8 @@ A user creates a "kickoff" issue on a (private) orchestration repo with a `kicko
+ Kickoff Issue → Bootstrap Project → Create Repo → Generate Outline → Plan Chapters
+     → Create Issues → Write Chapters (parallel batches) → Editorial Review
+     → Revise (if needed) → Merge → Continuity Check → Next Chapters
+-    → Continuity Audit → Final Review
++    → Continuity Audit → Continuity Fix → Final Review
++    → Package Manuscript → Generate Listing → Released
+ ```
+ 
+ Each chapter goes through a writing loop:
+@@ -35,8 +36,8 @@ Continuity state (character positions, timeline, plot threads, established facts
+ 
+ AWS-native serverless architecture:
+ 
+-- **15 Lambda handlers** — one per pipeline stage, event-driven via SQS FIFO
+-- **7 ECS Fargate workers** — long-running Claude Code CLI tasks (outliner, planner, writer, editor, reviser, continuity-checker, auditor)
++- **20 Lambda handlers** — one per pipeline stage, event-driven via SQS FIFO
++- **10 ECS Fargate workers** — long-running Claude Code CLI tasks (outliner, planner, writer, editor, reviser, continuity-checker, auditor, fixer, packager, marketer)
+ - **Step Functions** — orchestrates async ECS polling without busy-wait
+ - **DynamoDB** — 5 tables (projects, task-graphs, agent-runs, task-outputs, repo-locks)
+ - **SQS FIFO** — work-item queue with per-project message grouping
+@@ -46,8 +47,8 @@ AWS-native serverless architecture:
+ ```
+ packages/
+   core/       # Shared library: config, DynamoDB services, GitHub client, prompts, queue, writing utilities
+-  lambdas/    # 15 Lambda handlers + integration tests
+-  worker/     # ECS worker entrypoint + 7 worker types (Docker)
++  lambdas/    # 20 Lambda handlers + integration tests
++  worker/     # ECS worker entrypoint + 10 worker types (Docker)
+   cdk/        # AWS CDK infrastructure stack (10 constructs)
+ ```
+ 
+@@ -63,15 +64,18 @@ packages/
+ | **create-issues** | Creates GitHub issues per chapter from task graph, triggers first batch |
+ | **trigger-chapter** | Acquires repo lock, loads continuity state, launches writer ECS task |
+ | **reconcile** | Central state machine — polls ECS tasks, routes results to downstream handlers |
++| **reconcile-enqueuer** | EventBridge schedule (every 5 min) — detects stalled agent runs, re-enqueues reconciliation |
++| **rate-limit-recovery** | Step Functions (rate-limit-waiter) — re-enqueues work paused by the rate-limit circuit breaker |
+ | **review-chapter** | Launches editor ECS task with chapter content + continuity state |
+ | **revise-chapter** | Launches reviser ECS task with editorial feedback |
+ | **merge-chapter** | Validates merge readiness, squash-merges PR, closes issue, releases repo lock |
+ | **continuity-check** | Launches continuity-checker ECS task, loads existing state from repo |
+ | **trigger-next-chapter** | Finds ready nodes in dependency DAG, respects concurrency limit |
+ | **continuity-audit** | Launches auditor ECS task for holistic full-book continuity audit after all chapters merge |
+-| **final-review** | Tallies word counts, marks project complete |
+-
+-A **reconcile-enqueuer** (EventBridge schedule) runs every 5 minutes to detect stalled agent runs and re-enqueue them.
++| **continuity-fixer** | Launches fixer ECS task to apply minimal fixes for issues raised by the audit |
++| **final-review** | Tallies word counts, enables the build-book workflow, marks project `PACKAGING`, hands off to the release phase |
++| **package-manuscript** | Launches packager ECS task to assemble the manuscript and release manifest |
++| **generate-listing** | Launches marketer ECS task to write the KDP store listing, marks project `RELEASING` |
+ 
+ ### ECS Workers
+ 
+@@ -84,6 +88,9 @@ A **reconcile-enqueuer** (EventBridge schedule) runs every 5 minutes to detect s
+ | **reviser** | Incorporates editorial feedback, pushes revisions to same branch |
+ | **continuity-checker** | Audits cross-chapter consistency, produces state delta and report |
+ | **auditor** | Performs holistic full-book continuity audit across all chapters (120-min timeout) |
++| **fixer** | Applies minimal fixes for issues raised by the full-book continuity audit |
++| **packager** | Assembles merged chapters into a single manuscript and release manifest |
++| **marketer** | Writes the KDP store listing (blurb, keywords, categories) |
+ 
+ Workers fetch system prompts from DynamoDB via `RUN_ID` and execute the Claude Code CLI. All workers run on 2 vCPU / 8 GB Fargate tasks.
+ 
+@@ -123,8 +130,8 @@ The infrastructure is composed of 10 CDK constructs:
+ | **queue** | SQS FIFO queue with per-project message grouping |
+ | **registry** | ECR repository for worker Docker images |
+ | **secrets** | Secrets Manager (GitHub App key, Claude OAuth token, webhook secret) |
+-| **compute** | ECS Fargate cluster with 6 task definitions |
+-| **functions** | 14 Lambda functions with least-privilege IAM roles |
++| **compute** | ECS Fargate cluster with 10 task definitions |
++| **functions** | 20 Lambda functions with least-privilege IAM roles |
+ | **api** | API Gateway HTTP API (POST /webhooks/github) |
+ | **orchestration** | Step Functions state machine for ECS task polling |
+ | **monitoring** | CloudWatch alarms, dashboards, log groups |
+diff --git a/docs/HLD.md b/docs/HLD.md
+index 2c60858..95969d1 100644
+--- a/docs/HLD.md
++++ b/docs/HLD.md
+@@ -32,13 +32,13 @@ The shared foundation consumed by all other packages.
+ | `github/` | Octokit wrapper for repo creation, issue management, PR lifecycle |
+ | `logger/` | Structured JSON logging with correlation IDs |
+ | `merge-policy/` | Merge readiness evaluation against editorial criteria (word count gate, review approval, continuity pass) |
+-| `prompts/` | System prompt templates for all six agent types (outliner, planner, writer, editor, reviser, continuity-checker) |
++| `prompts/` | System prompt templates for all ten agent types (outliner, planner, writer, editor, reviser, continuity-checker, auditor, continuity-fixer, packager, marketer) |
+ | `queue/` | SQS work-item type definitions and enqueue helper |
+ | `writing/` | Writing-domain utilities: continuity tracking, word count validation, chapter markdown parsing, style checking |
+ 
+ ### 2.2 Lambda Handlers (`@auto-graph/lambdas`)
+ 
+-Fourteen event-driven Lambda functions, each handling one work-item type.
++Twenty event-driven Lambda functions, each handling one work-item type.
+ 
+ | Handler | Trigger | Responsibility |
+ |---|---|---|
+@@ -55,11 +55,17 @@ Fourteen event-driven Lambda functions, each handling one work-item type.
+ | `merge-chapter` | SQS | Merge approved chapter PR, enqueue `CONTINUITY_CHECK` |
+ | `continuity-check` | SQS | Launch continuity-checker ECS task, update continuity state |
+ | `trigger-next-chapter` | SQS | Find next chapter(s) with satisfied dependencies, enqueue `TRIGGER_CHAPTER` |
++| `continuity-audit` | SQS | Launch auditor ECS task for a holistic full-book continuity audit once all chapters merge |
++| `continuity-fixer` | SQS | Launch fixer ECS task to apply minimal fixes for issues raised by the audit |
++| `final-review` | SQS | Tally word counts, enable the build-book workflow, mark project `PACKAGING`, enqueue `PACKAGE_MANUSCRIPT` |
++| `package-manuscript` | SQS | Launch packager ECS task to assemble the manuscript and release manifest |
++| `generate-listing` | SQS | Launch marketer ECS task to write the KDP store listing |
++| `rate-limit-recovery` | Step Functions (rate-limit-waiter) | Re-enqueue work paused by the rate-limit circuit breaker once the backoff window elapses |
+ | `webhook-handler` | API Gateway | Receive GitHub webhooks (PR events), route to appropriate handler |
+ 
+ ### 2.3 ECS Workers (`@auto-graph/worker`)
+ 
+-Six purpose-built Fargate task definitions, each running Claude Code CLI with a domain-specific system prompt.
++Ten purpose-built Fargate task definitions, each running Claude Code CLI with a domain-specific system prompt.
+ 
+ | Worker | Purpose | Resources |
+ |---|---|---|
+@@ -69,10 +75,14 @@ Six purpose-built Fargate task definitions, each running Claude Code CLI with a
+ | `editor` | Editorial review against writing criteria | 0.5 vCPU / 2 GB |
+ | `reviser` | Revise chapter based on editorial feedback | 1 vCPU / 4 GB |
+ | `continuity-checker` | Cross-chapter consistency audit | 0.5 vCPU / 2 GB |
++| `auditor` | Holistic full-book continuity audit across all chapters | 2 vCPU / 8 GB |
++| `continuity-fixer` | Apply minimal fixes for issues raised by the full-book audit | 2 vCPU / 8 GB |
++| `packager` | Assemble merged chapters into a single manuscript and release manifest | 2 vCPU / 8 GB |
++| `marketer` | Write the KDP store listing (blurb, keywords, categories) | 2 vCPU / 8 GB |
+ 
+ ### 2.4 CDK Infrastructure (`@auto-graph/cdk`)
+ 
+-A single CDK stack that provisions all AWS resources: VPC, ECS cluster, six task definitions, fourteen Lambda functions, SQS FIFO queues, DynamoDB tables, Step Functions state machines, API Gateway, EventBridge pipes, ECR repository, and CloudWatch alarms.
++A single CDK stack that provisions all AWS resources: VPC, ECS cluster, ten task definitions, twenty Lambda functions, SQS FIFO queues, DynamoDB tables, Step Functions state machines, API Gateway, EventBridge pipes, ECR repository, and CloudWatch alarms.
+ 
+ ---
+ 
+@@ -126,10 +136,38 @@ User creates kickoff issue on orchestration repo
+                     │                        │
+                     ▼                        ▼
+               ┌───────────────────────────────┐
+-              │       FINAL_REVIEW            │
+-              │  (full manuscript continuity   │
+-              │   audit after all chapters)    │
+-              └───────────────────────────────┘
++              │       CONTINUITY_AUDIT         │
++              │  (ECS: auditor — full-book     │
++              │   continuity audit)             │
++              └────────────────┬───────────────┘
++                                │ enqueues CONTINUITY_FIX
++                                ▼
++                    ┌───────────────────────────┐
++                    │     CONTINUITY_FIX         │
++                    │  (ECS: continuity-fixer)   │
++                    └────────────────┬───────────┘
++                                     │ enqueues FINAL_REVIEW
++                                     ▼
++                        ┌───────────────────────┐
++                        │     FINAL_REVIEW       │
++                        │  (tally word counts,   │
++                        │   mark PACKAGING)      │
++                        └────────────┬───────────┘
++                                     │ enqueues PACKAGE_MANUSCRIPT
++                                     ▼
++                        ┌───────────────────────┐
++                        │  PACKAGE_MANUSCRIPT    │
++                        │  (ECS: packager)       │
++                        └────────────┬───────────┘
++                                     │ enqueues GENERATE_LISTING, marks RELEASING
++                                     ▼
++                        ┌───────────────────────┐
++                        │   GENERATE_LISTING     │
++                        │  (ECS: marketer)       │
++                        └────────────┬───────────┘
++                                     │ validates listing
++                                     ▼
++                            RELEASED  /  FAILED
+ ```
+ 
+ ### 3.2 Chapter Writing Loop (Detail)
+diff --git a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+index d6bcfa7..29b2bbf 100644
+--- a/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
++++ b/packages/lambdas/src/__tests__/integration/pipeline-flow.test.ts
+@@ -211,9 +211,9 @@ describe('Full pipeline flow (1-chapter project)', () => {
+       'RECONCILE', // auditor
+       'CONTINUITY_FIX',
+       'RECONCILE', // fixer
++      'FINAL_REVIEW',
+       'PACKAGE_MANUSCRIPT',
+       'RECONCILE', // packager
+-      'FINAL_REVIEW',
+       'GENERATE_LISTING',
+       'RECONCILE', // marketer
+     ];
+diff --git a/packages/lambdas/src/handlers/__tests__/final-review.test.ts b/packages/lambdas/src/handlers/__tests__/final-review.test.ts
+index c62152d..c98f9ff 100644
+--- a/packages/lambdas/src/handlers/__tests__/final-review.test.ts
++++ b/packages/lambdas/src/handlers/__tests__/final-review.test.ts
+@@ -74,7 +74,7 @@ const allMergedGraph = {
+ 
+ let mockProjectServiceMethods: {
+   get: ReturnType<typeof vi.fn>;
+-  setComplete: ReturnType<typeof vi.fn>;
++  updateStatus: ReturnType<typeof vi.fn>;
+ };
+ let mockTaskGraphServiceMethods: {
+   getLatest: ReturnType<typeof vi.fn>;
+@@ -117,7 +117,7 @@ beforeEach(() => {
+ 
+   mockProjectServiceMethods = {
+     get: vi.fn().mockResolvedValue(validProject),
+-    setComplete: vi.fn().mockResolvedValue(undefined),
++    updateStatus: vi.fn().mockResolvedValue(undefined),
+   };
+   vi.mocked(ProjectService).mockImplementation(() => mockProjectServiceMethods as never);
+ 
+@@ -134,14 +134,10 @@ beforeEach(() => {
+ });
+ 
+ describe('final-review handler', () => {
+-  it('marks project COMPLETE with word counts from task graph nodes', async () => {
++  it('marks project PACKAGING after summing word counts from task graph nodes', async () => {
+     await handler(makeEvent('proj-123'), {} as never, () => {});
+ 
+-    expect(mockProjectServiceMethods.setComplete).toHaveBeenCalledWith(
+-      'proj-123',
+-      90000, // 30000 + 28000 + 32000
+-      3,
+-    );
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'PACKAGING');
+   });
+ 
+   it('falls back to reading chapter files when wordCount is missing', async () => {
+@@ -163,11 +159,7 @@ describe('final-review handler', () => {
+     await handler(makeEvent('proj-123'), {} as never, () => {});
+ 
+     expect(mockGitHubClientMethods.getFileContent).toHaveBeenCalledTimes(3);
+-    expect(mockProjectServiceMethods.setComplete).toHaveBeenCalledWith(
+-      'proj-123',
+-      450, // 100 + 200 + 150
+-      3,
+-    );
++    expect(mockProjectServiceMethods.updateStatus).toHaveBeenCalledWith('proj-123', 'PACKAGING');
+   });
+ 
+   it('enables build-book workflow push trigger after completion', async () => {
+@@ -182,12 +174,12 @@ describe('final-review handler', () => {
+     expect(message).toContain('enable');
+   });
+ 
+-  it('enqueues GENERATE_LISTING to start the release phase second stage', async () => {
++  it('enqueues PACKAGE_MANUSCRIPT to start the release phase first stage', async () => {
+     await handler(makeEvent('proj-123'), {} as never, () => {});
+ 
+     expect(vi.mocked(enqueue)).toHaveBeenCalledWith(
+       'https://sqs.us-east-1.amazonaws.com/123/test.fifo',
+-      { type: 'GENERATE_LISTING', projectId: 'proj-123' },
++      { type: 'PACKAGE_MANUSCRIPT', projectId: 'proj-123' },
+     );
+   });
+ 
+diff --git a/packages/lambdas/src/handlers/final-review.ts b/packages/lambdas/src/handlers/final-review.ts
+index 713f6a0..d6345ed 100644
+--- a/packages/lambdas/src/handlers/final-review.ts
++++ b/packages/lambdas/src/handlers/final-review.ts
+@@ -65,7 +65,7 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+ 
+   const chapterCount = taskGraph.nodes.length;
+ 
+-  await projectService.setComplete(projectId, totalWordCount, chapterCount);
++  await projectService.updateStatus(projectId, 'PACKAGING');
+ 
+   // Enable the build-book workflow push trigger now that the book is complete
+   const workflowContent = buildBookWorkflow(project.repoName, true);
+@@ -76,14 +76,14 @@ export async function handle(workItem: WorkItem, context: HandlerContext): Promi
+     'ci: enable build-book workflow push trigger',
+   );
+ 
+-  // The manuscript is packaged and reviewed — proceed to the release phase's
+-  // second stage, where the marketer writes and validates the store listing.
++  // The manuscript has passed final review — hand off to the release phase's
++  // first stage, where the packager assembles the release artifacts.
+   await enqueue(config.SQS_QUEUE_URL, {
+-    type: 'GENERATE_LISTING',
++    type: 'PACKAGE_MANUSCRIPT',
+     projectId,
+   });
+ 
+-  logger.info('Final review complete, project marked COMPLETE, enqueued GENERATE_LISTING', {
++  logger.info('Final review complete, project marked PACKAGING, enqueued PACKAGE_MANUSCRIPT', {
+     projectId,
+     totalWordCount,
+     chapterCount,
+diff --git a/packages/lambdas/src/handlers/reconcile.ts b/packages/lambdas/src/handlers/reconcile.ts
+index e8497d8..b656a5a 100644
+--- a/packages/lambdas/src/handlers/reconcile.ts
++++ b/packages/lambdas/src/handlers/reconcile.ts
+@@ -1030,14 +1030,14 @@ async function runReconcile(
+ 
+     case 'fixer': {
+       // Fixer completed (either applied fixes or no-opped on a clean audit).
+-      // Proceed to manuscript packaging.
++      // Proceed to final review.
+       await enqueueReaction(
+         config.SQS_QUEUE_URL,
+-        { type: 'PACKAGE_MANUSCRIPT', projectId },
++        { type: 'FINAL_REVIEW', projectId },
+         runId,
+       );
+ 
+-      logger.info('Fixer succeeded, enqueued PACKAGE_MANUSCRIPT', {
++      logger.info('Fixer succeeded, enqueued FINAL_REVIEW', {
+         projectId,
+         runId,
+       });
+@@ -1046,14 +1046,17 @@ async function runReconcile(
+ 
+     case 'packager': {
+       // Packager assembled the manuscript and release manifest — proceed to
+-      // final review.
++      // the release phase's second stage, where the marketer writes and
++      // validates the store listing.
++      await projectService.updateStatus(projectId, 'RELEASING');
++
+       await enqueueReaction(
+         config.SQS_QUEUE_URL,
+-        { type: 'FINAL_REVIEW', projectId },
++        { type: 'GENERATE_LISTING', projectId },
+         runId,
+       );
+ 
+-      logger.info('Packager succeeded, enqueued FINAL_REVIEW', {
++      logger.info('Packager succeeded, project marked RELEASING, enqueued GENERATE_LISTING', {
+         projectId,
+         runId,
+       });
